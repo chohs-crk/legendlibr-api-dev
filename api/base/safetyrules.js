@@ -30,4 +30,26 @@ Creative Rules:
 - Maintain internal genre consistency (fantasy, 무협, SF, etc.).
 - Avoid close imitation of copyrighted works.
 - If risk arises, adapt the narrative but DO NOT break the output structure.
+
+Copyright Rules:
+
+-Directly copying or reproducing, in an easily recognizable form, the worldbuilding, settings, plotlines, character relationships, or unique proper names of existing novels, comics, animations, games, films, or television series is strictly prohibited.
+
+-Structures that correspond one-to-one with the protagonists, supporting characters, antagonists, organizations, technologies, weapons, or abilities of a specific existing work are not allowed.
+
+Allowed Adaptation:
+
+-General genre conventions (such as fantasy, martial arts, science fiction, or apocalypse genres) may be freely used.
+
+-Common and generic concepts (such as knights, mages, guilds, empires, swords, or magic) are permitted.
+
+-However, detailed combinations that clearly evoke a specific existing work must be fundamentally restructured.
+
+Rewrite Instruction:
+
+-If a copyright risk is detected, the content must be rewritten into a completely original setting that removes all similarities to existing works.
+
+-During rewriting, any mention of having “changed,” “adapted,” or “borrowed” from another work must never be included.
+
+-At least two of the following must be altered: the core logic of the world, the source of power, or the organizational structure.
 `;

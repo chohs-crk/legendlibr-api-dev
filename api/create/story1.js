@@ -1,4 +1,8 @@
-﻿export const config = { runtime: "nodejs" };
+﻿export const config = {
+    runtime: "nodejs",
+    compute: 1
+};
+
 
 
 import { getSession, setSession } from "../base/sessionstore.js";
@@ -11,10 +15,20 @@ import { withApi } from "../_utils/withApi.js";
 /* ---------------- PARSE ---------------- */
 function parseStory(text) {
     const storyMatch = text.match(/<STORY>([\s\S]*?)<\/STORY>/);
-    const choiceMatch = text.match(/<CHOICES>([\s\S]*?)<\/CHOICES>/);
+   
 
     const story = storyMatch ? storyMatch[1].trim() : "";
-    const rawChoices = choiceMatch ? choiceMatch[1].trim().split("\n") : [];
+    const choiceMatch =
+        text.match(/<CHOICES>([\s\S]*?)<\/CHOICES>/) ||
+        text.match(/<CHOICES>([\s\S]*)$/); // 닫는 태그 없을 경우 보정
+
+    const rawChoices = choiceMatch
+        ? choiceMatch[1]
+            .trim()
+            .split("\n")
+            .map(l => l.trim())
+            .filter(Boolean)
+        : [];
 
     const choices = rawChoices.map(c => {
         const m = c.trim().match(/^(.*)\s+#(\d+)$/);
@@ -32,36 +46,62 @@ function buildPrompt(s) {
     const origin = s.input.origin;
     const region = s.input.region;
 
-    const refinedName = s.output.name || s.input.name;
-    const refinedIntro = s.output.intro || s.input.prompt;
-    const theme = s.output.theme || "";
+    const {
+        name,
+        intro,
+        existence,
+        canSpeak,
+        speechStyle,
+        narrationStyle,
+        theme
+    } = s.output;
 
     return `
-[CHAR]
-이름: ${refinedName}
-배경: ${refinedIntro}
-주제: ${theme}
-성격: 내향/외향, 이상/현실 등 한 두 가지 성향을 암시
-내적동기: 주제와 연결된 명확한 욕망·공포·책임
+[이야기 전제]
+이 이야기는 이미 존재하는 한 인물을 독자에게 소개하는 장면이다.
+선택, 결정, 갈림길 같은 개념은 서술하지 않는다.
+독자는 자연스럽게 이 인물이 어떤 존재인지 이해하게 된다.
 
-[WORLD]
-기원: ${origin.name} ${origin.desc}
-지역: ${region.name} ${region.detail}
-환경: 사회 분위기, 갈등 구조, 주요 세력
-기원-지역의 문화적 차이도 표현 가능
+[선택지 생성 지침]
+ - 선택지는 다음 장면으로 바로 이어질 수 있는 서술 문장이다
+ - "만약", "하려 한다", "하려고 한다" 같은 가정형 표현 금지
+ - 이미 행동이 시작되었거나 결정된 것처럼 서술한다
+ - 선택지는 STORY에 이어 붙여도 어색하지 않아야 한다
+ - 문장 부호가 포함되어야 한다.
+ - 직전 문장 다음에 올 소설 문장처럼 생각하라
 
-[STORY_OPENING]
-- 일상 속 균열 또는 불길한 징조
-- 캐릭터의 기존 가치와 주제의 충돌 암시
-- 과장 없이 서서히 위기 도입
-- 감정선 <갈등·망설임·두려움> 표현
+[캐릭터 핵심]
+이름: ${name}
+소개: ${intro}
+존재 형태: ${existence}
+발화 가능 여부: ${canSpeak ? "직접 대사 가능" : "직접 대사 불가"}
+대사 방식:
+${speechStyle}
 
-[금지]
-- 큰전투/결말/해결
-- 이전 내용 반복
-- 선택지를 유도하는 문장은 암시만
+서술 문체 규칙:
+${narrationStyle}
+
+[도입부 서사 지침]
+- 이 장면은 캐릭터 소개이자 이야기의 첫 호흡이다
+- 직업, 역할, 삶의 위치가 한 문장 이상으로 명확히 드러나야 한다
+- 외형, 자세, 습관, 시선, 주변 풍경을 통해 인물을 보여준다
+- 일상의 연속선 위에서 이야기를 시작한다. 사소한 계기가 발생한다
+- 독자가 이 인물의 현재 상태를 자연스럽게 파악하게 한다
+
+[세계 배경 참고]
+기원: ${origin.name} - ${origin.desc}
+지역: ${region.name} - ${region.detail}
+
+[주제]
+${theme}
+
+[절대 금지]
+- 선택, 결정, 다음 행동을 암시하는 표현
+- 미래 전개 예고
+- 설명식 설정 나열
 `;
 }
+
 
 /* ---------------- SENTENCE UTILITY ---------------- */
 function flushSentences(buffer, onFlush) {
@@ -100,7 +140,11 @@ async function stream(uid, s, res) {
 
     let inStory = false;
     try {
-    await callStoryAIStream(uid, delta => {
+        await callStoryAIStream(uid, delta => {
+            // 🔥 SSE 로 보내기 전, delta 에서 #숫자 패턴을 모두 제거
+            if (typeof delta === "string") {
+                delta = delta.replace(/#\d+/g, "");
+            }
         full += delta;
 
         // ★ STORY 태그 진입 전
@@ -121,8 +165,14 @@ async function stream(uid, s, res) {
 
         // ✅ 문장 단위 flush만 허용
         sentenceBuffer = flushSentences(sentenceBuffer, sentence => {
+            // 🔥 선택지 후보는 스트리밍 금지
+            if (sentence.includes("#")) return;
+
             res.write(`data: ${sentence}\n\n`);
         });
+
+
+
 
         // ❌ UX flush 완전히 제거
     }, prompt);
@@ -140,11 +190,18 @@ async function stream(uid, s, res) {
         res.write(`data: ${sentenceBuffer}\n\n`);
     }
 
+    /* ================= DEBUG START ================= */
+    console.log("=== RAW FULL AI OUTPUT (STORY1) ===");
+    console.log(full);
+    console.log("=== END RAW FULL AI OUTPUT ===");
+    /* ================== DEBUG END ================== */
+
     // 그 이후에 choices 정보 전송
     const parsed = parseStory(full);
     res.write(`event: choices\ndata: ${JSON.stringify({
         choices: parsed.choices.map(c => c.text)
     })}\n\n`);
+
 
     /* ---- 점수는 서버 내부에서만 계산 ---- */
     const sorted = [...parsed.choices].sort((a, b) => b.rawScore - a.rawScore);

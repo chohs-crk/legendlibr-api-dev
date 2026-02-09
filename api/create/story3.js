@@ -1,4 +1,8 @@
-﻿export const config = { runtime: "nodejs" };
+﻿export const config = {
+    runtime: "nodejs",
+    compute: 1
+};
+
 
 
 import { getSession, setSession } from "../base/sessionstore.js";
@@ -11,10 +15,20 @@ import { withApi } from "../_utils/withApi.js";
 /* ---------------- PARSE ---------------- */
 function parseStory(text) {
     const storyMatch = text.match(/<STORY>([\s\S]*?)<\/STORY>/);
-    const choiceMatch = text.match(/<CHOICES>([\s\S]*?)<\/CHOICES>/);
+   
 
     const story = storyMatch ? storyMatch[1].trim() : "";
-    const rawChoices = choiceMatch ? choiceMatch[1].trim().split("\n") : [];
+    const choiceMatch =
+        text.match(/<CHOICES>([\s\S]*?)<\/CHOICES>/) ||
+        text.match(/<CHOICES>([\s\S]*)$/); // 닫는 태그 없을 경우 보정
+
+    const rawChoices = choiceMatch
+        ? choiceMatch[1]
+            .trim()
+            .split("\n")
+            .map(l => l.trim())
+            .filter(Boolean)
+        : [];
 
     const choices = rawChoices.map(c => {
         const m = c.trim().match(/^(.*)\s+#(\d+)$/);
@@ -29,43 +43,74 @@ function parseStory(text) {
 
 /* ---------------- PROMPT (story3) ---------------- */
 function buildPrompt(s) {
+    const {
+        name,
+        intro,
+        existence,
+        canSpeak,
+        speechStyle,
+        narrationStyle,
+        theme
+    } = s.output;
+
     const p1 = s.output.story1?.story || "";
     const p2 = s.output.story2?.story || "";
-    const c1 = s.output.story1?.choices[s.selected?.story1]?.text || "";
-    const c2 = s.output.story2?.choices[s.selected?.story2]?.text || "";
 
-    const refinedName = s.output.name || s.input.name;
-    const refinedIntro = s.output.intro || s.input.prompt;
-    const theme = s.output.theme || "";
+    const origin = s.input.origin;
+    const region = s.input.region;
 
     return `
-[캐릭터 정보]
-이름: ${refinedName}
-배경: ${refinedIntro}
-주제: ${theme}
-심리전개: 갈등의 정점, 가치관의 선택 압박
+[이야기 전제]
+이 장면은 이야기의 전환점이다.
+되돌릴 수 없는 사건이나 진실이 드러난다.
+선택이라는 개념은 언급하지 않는다.
 
-[이전 스토리]
+[선택지 생성 지침]
+ - 선택지는 다음 장면으로 바로 이어질 수 있는 서술 문장이다
+ - "만약", "하려 한다", "하려고 한다" 같은 가정형 표현 금지
+ - 이미 행동이 시작되었거나 결정된 것처럼 서술한다
+ - 선택지는 STORY에 이어 붙여도 어색하지 않아야 한다
+ - 문장 부호가 포함되어야 한다.
+ - 직전 문장 다음에 올 소설 문장처럼 생각하라
+
+[이전 서사]
 ${p1}
-
-"${c1}"
 
 ${p2}
 
-"${c2}"
+[캐릭터 고정 정보]
+이름: ${name}
+소개: ${intro}
+존재 형태: ${existence}
+발화 가능 여부: ${canSpeak ? "직접 대사 가능" : "직접 대사 불가"}
 
-[CLIMAX_BUILD]
-- 갈등이 절정으로 향하는 사건
-- 동료/적/과거 기억 등장 가능
-- 주제의 핵심 질문을 마주하게 한다
-- 선택의 대가가 무엇인지 암시
-- 결말 직전에서 STOP
+대사 방식 규칙:
+${speechStyle}
 
-[금지]
-- 해결/엔딩
-- 주제 해설
+서술 문체 규칙:
+${narrationStyle}
+
+[결정적 장면 지침]
+- 클라이막스 부분을 서술하는 느낌
+- 감정은 직접 설명하지 않는다
+- 발화 불가인 경우, 침묵·행동·환경 변화로만 표현한다
+- 결말을 말하지 말고, 바로 직전에서 멈춘다
+
+[세계 배경 참고]
+기원: ${origin.name}
+지역: ${region.name}
+
+[주제]
+${theme}
+
+[절대 금지]
+- 결말 서술
+- 교훈 정리
+- 선택, 결단, 다음 행동 암시
 `;
 }
+
+
 
 /* ---------------- SENTENCE ---------------- */
 function flushSentences(buffer, onFlush) {
@@ -104,7 +149,11 @@ async function stream(uid, s, res) {
 
     let inStory = false;
     try {
-    await callStoryAIStream(uid, delta => {
+        await callStoryAIStream(uid, delta => {
+            // 🔥 SSE 로 보내기 전, delta 에서 #숫자 패턴을 모두 제거
+               if (typeof delta === "string") {
+                      delta = delta.replace(/#\d+/g, "");
+                   }
         full += delta;
 
         // ★ STORY 태그 진입 전
@@ -125,8 +174,14 @@ async function stream(uid, s, res) {
 
         // ✅ 문장 단위 flush만 허용
         sentenceBuffer = flushSentences(sentenceBuffer, sentence => {
+            // 🔥 선택지 후보는 스트리밍 금지
+            if (sentence.includes("#")) return;
+
             res.write(`data: ${sentence}\n\n`);
         });
+
+
+
 
         // ❌ UX flush 완전히 제거
     }, prompt);

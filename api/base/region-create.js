@@ -1,12 +1,14 @@
 ﻿export const config = {
     runtime: "nodejs"
 };
+
 import { withApi } from "../_utils/withApi.js";
 import { db } from "../../firebaseAdmin.js";
 import fetch from "node-fetch";
 import { ORIGINS } from "../base/data/origins.js";
+import { SAFETY_RULES } from "../base/safetyrules.js";
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY?.trim();
 
 // =========================
 // JSON 정리 공통 함수
@@ -27,58 +29,132 @@ function safeJsonParse(raw) {
     }
 }
 
-
-
-// =========================
-// 세션 쿠키
-// =========================
-function getSessionCookie(req) {
-    const cookie = req.headers.cookie || "";
-    return cookie
-        .split(";")
-        .find(v => v.trim().startsWith("session="))
-        ?.split("=")[1] || null;
-}
-
 // =========================
 // 메인 핸들러
 // =========================
 export default withApi("expensive", async (req, res, { uid }) => {
-    if (req.method !== "POST") return res.status(405).json({ ok: false });
+    if (req.method !== "POST") {
+        return res.status(405).json({ ok: false });
+    }
 
     const { originId, name, detail } = req.body || {};
     if (!originId || !name || !detail) {
         return res.status(400).json({ ok: false, error: "INVALID_INPUT" });
     }
 
-    // origin 정보 가져오기 (score 계산 필요)
+    // ===============================
+    // origin 정보 확인
+    // ===============================
     const originData = ORIGINS[originId];
     if (!originData) {
         return res.status(400).json({ ok: false, error: "INVALID_ORIGIN" });
     }
 
     // ===============================
-    // 🎯 detail 문장 정제 (정확히 500자)
+    // 🎯 detail 정제 + 🔒 검열 + 언어 판단 (통합 AI 호출)
     // ===============================
     let refinedDetail = detail;
 
+    let safetyResult = {
+        nameSafetyScore: 0,
+        detailSafetyScore: 0,
+        copyrightScore: 0,
+        needKorean: false,
+        koreanName: name
+    };
+
     try {
         const prompt = `
-당신은 TRPG 세계관 전문 편집자다.
-아래 지역 설명을 자연스럽게 정제하되,
-최종 결과는 반드시 띄어쓰기 포함**정확히 470자 이상 530자 이하**로 작성한다.
-문단 나누기·줄바꿈·따옴표·불필요한 공백 없이 한 문단으로만 작성하라.
-500자를 벗어나면 다시 작성해야 한다.
+${SAFETY_RULES}
 
-[입력 원문]
+너는 TRPG 게임 서비스의 지역 생성 전용 AI다.
+
+[출력 규칙]
+- 반드시 JSON만 반환한다
+- JSON 외의 설명, 문장, 코드블록은 절대 출력하지 마라
+
+[역할]
+1. 지역 설명을 자연스럽게 정제한다
+2. 서비스 검열 기준에 따라 위험 점수를 계산한다
+3. 지역 이름의 언어 적합성을 판단한다
+
+────────────────
+[정제 규칙 – 기존 요구사항 유지]
+────────────────
+- 지역 설명은 띄어쓰기 포함 **470자 이상 530자 이하**
+- 한 문단으로만 작성
+- 문단 나누기, 줄바꿈, 따옴표 사용 금지
+- 불필요한 공백 제거
+- 500자를 벗어나면 다시 작성해야 한다
+
+────────────────
+[점수 규칙]
+────────────────
+- 모든 점수는 0~100 정수
+- 0에 가까울수록 안전, 100에 가까울수록 위험
+
+nameSafetyScore:
+- 선정성, 욕설, 음란어
+- 실존 작품/지역/고유명사 연상
+- 특수문자·비가독성 이름
+- 언어 필터 우회 시도
+
+detailSafetyScore:
+- 과도한 폭력, 성적 묘사
+- 혐오 표현
+- 노골적인 실존 작품 설정 차용
+
+copyrightScore:
+- 특정 작품, 세계관, 설정이 명확히 연상될수록 점수 상승
+
+────────────────
+[언어 판단 규칙]
+────────────────
+- 한글과 영문은 허용
+- 한글/영문/숫자/일반 특수문자 외 문자가 포함될 경우
+- 단 '한국어'가 아닌 한글 또한 허용
+  예를 들어 'आत्मन्'은 불허하지만 '아트만'은 허용
+
+  위 조건을 만족함과 병렬 한글 표기가 없으면 needKorean = true
+  예를 들어 광속 拔刀(발도)는 허용, 광속 拔刀만 있을 경우 병렬 한글 표기 없음 간주
+
+- 특수문자로만 구성된 이름도 needKorean = true
+
+
+────────────────
+[koreanName 생성 규칙]
+────────────────
+- 항상 사람이 읽을 수 있는 순수 한글 이름을 생성한다.
+- 특수문자는 제거한다.
+- 반복 어휘는 하나로 정리한다.
+- 한자 및 외국 문자는 의미를 유지한 한글로 치환한다.
+- 예:
+  - 철혈의 騎士  → 철혈의 기사
+  - 철혈의 騎士(기사) → 철혈의 기사
+  - आत्मन् → 아트만
+  -The King → 더 킹
+
+────────────────
+[입력 데이터]
+────────────────
+지역 이름:
+${name}
+
+지역 설명 원문:
 ${detail}
 
-반환 형식(JSON):
+────────────────
+[출력 JSON 형식]
+────────────────
 {
-  "refined": "정제된 문장"
+  "refinedDetail": "정제된 지역 설명",
+  "nameSafetyScore": 0,
+  "detailSafetyScore": 0,
+  "copyrightScore": 0,
+  "needKorean": false,
+  "koreanName": "정규화된 한글 지역명"
 }
 `;
-
 
         const r = await fetch("https://api.openai.com/v1/chat/completions", {
             method: "POST",
@@ -88,27 +164,74 @@ ${detail}
             },
             body: JSON.stringify({
                 model: "gpt-4o-mini",
-                messages: [{ role: "user", content: prompt }],
-                temperature: 0.7
+                temperature: 0.4,
+                messages: [{ role: "user", content: prompt }]
             })
         });
 
         const j = await r.json();
-        const raw = j.choices?.[0]?.message?.content || "{}";
+
+        const raw = j.choices?.[0]?.message?.content;
+        if (!raw) {
+            throw new Error("AI_EMPTY_RESPONSE");
+        }
+
         const parsed = safeJsonParse(raw);
 
-        if (parsed.refined) refinedDetail = parsed.refined.trim();
-        if (refinedDetail.length > 600) {
-            refinedDetail = refinedDetail.slice(0, 600);
+        if (!parsed || typeof parsed !== "object" || !parsed.refinedDetail) {
+            throw new Error("AI_RESPONSE_INVALID");
         }
+
+
+
+        if (parsed.refinedDetail) {
+            refinedDetail = parsed.refinedDetail.trim();
+        }
+
+        safetyResult = {
+            nameSafetyScore: Number(parsed.nameSafetyScore) || 0,
+            detailSafetyScore: Number(parsed.detailSafetyScore) || 0,
+            copyrightScore: Number(parsed.copyrightScore) || 0,
+            needKorean: !!parsed.needKorean,
+            koreanName: parsed.koreanName || name
+        };
+
+        console.log("[REGION][REFINE+SAFETY]", {
+            uid,
+            safetyResult
+        });
+
     } catch (err) {
-        console.error("AI detail refine 실패:", err);
+        console.error("[REGION][AI REFINE FAIL]", err);
+
+        const code = err.message || "AI_CALL_FAILED";
+
+        return res.status(500).json({
+            ok: false,
+            error: code
+        });
+    }
+
+
+    // ===============================
+    // 🔒 점수 기준 초과 시 차단
+    // ===============================
+    if (safetyResult.nameSafetyScore >= 60) {
+        return res.status(400).json({ ok: false, error: "REGION_NAME_UNSAFE" });
+    }
+
+    if (safetyResult.detailSafetyScore >= 70) {
+        return res.status(400).json({ ok: false, error: "REGION_DETAIL_UNSAFE" });
+    }
+
+    if (safetyResult.copyrightScore >= 75) {
+        return res.status(400).json({ ok: false, error: "REGION_COPYRIGHT_RISK" });
     }
 
     // ===============================
     // ⭐ 세계관 적합도 평가 (1~10점)
     // ===============================
-    let originScore = 5; // 기본값
+    let originScore = 5;
 
     try {
         const scorePrompt = `
@@ -156,21 +279,30 @@ ${refinedDetail}
     // Firestore 저장
     // ===============================
     try {
-        // 1️⃣ regionsUsers에 실제 region 저장
         const regionRef = db.collection("regionsUsers").doc();
 
         await regionRef.set({
             originId,
+
             name,
+            koreanName: safetyResult.koreanName,
+            needKorean: safetyResult.needKorean,
+
+            safety: {
+                nameSafetyScore: safetyResult.nameSafetyScore,
+                detailSafetyScore: safetyResult.detailSafetyScore,
+                copyrightScore: safetyResult.copyrightScore
+            },
+
             detail: refinedDetail,
             score: originScore,
+
             owner: uid,
             ownerchar: null,
             charnum: 0,
             createdAt: new Date()
         });
 
-        // 2️⃣ 내 myregion에 참조만 저장
         await db.collection("users")
             .doc(uid)
             .collection("myregion")
@@ -185,9 +317,6 @@ ${refinedDetail}
             ok: true,
             id: regionRef.id
         });
-
-
-       
 
     } catch (err) {
         console.error("region-create DB ERROR:", err);

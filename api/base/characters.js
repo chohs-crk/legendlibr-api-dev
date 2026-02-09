@@ -32,7 +32,7 @@ function toPublicCharacter(doc) {
         regionDetail: d.regionDetail || "",
 
         promptRefined: d.promptRefined || "",
-        finalStory: d.finalStory || "",
+        fullStory: d.fullStory || "",
 
         battleScore: d.battleScore || 0,
         battleCount: d.battleCount || 0,
@@ -57,10 +57,11 @@ export default withApi("protected", async (req, res, { uid }) => {
         const { id } = req.query;
 
         /* =========================================================
-           (1) 전체 캐릭터 목록 조회
-           GET /api/characters
-        ========================================================= */
+    (1) 전체 캐릭터 목록 조회
+    GET /api/characters
+ ========================================================= */
         if (req.method === "GET" && !id) {
+            // 🔹 캐릭터 목록
             const snap = await db
                 .collection("characters")
                 .where("uid", "==", uid)
@@ -71,8 +72,21 @@ export default withApi("protected", async (req, res, { uid }) => {
                 toPublicCharacter(doc)
             );
 
-            return res.status(200).json({ characters });
+           
+
+            // 🔹 사용자 캐릭터 수 (서버 기준)
+            const userRef = db.collection("users").doc(uid);
+            const userSnap = await userRef.get();
+            const charCount =
+                userSnap.exists ? userSnap.data().charCount || 0 : 0;
+
+            return res.status(200).json({
+                characters,
+                charCount
+            });
+
         }
+
 
 
         /* =========================================================
@@ -108,9 +122,9 @@ export default withApi("protected", async (req, res, { uid }) => {
         }
 
         /* =========================================================
-   (3) 캐릭터 삭제
-   DELETE /api/characters?id=XXX
-========================================================= */
+    (3) 캐릭터 삭제
+    DELETE /api/characters?id=XXX
+ ========================================================= */
         if (req.method === "DELETE" && id) {
             const ref = db.collection("characters").doc(id);
             const snap = await ref.get();
@@ -125,64 +139,83 @@ export default withApi("protected", async (req, res, { uid }) => {
                 return res.status(403).json({ error: "본인 캐릭터 아님" });
             }
 
+            // =====================================================
+            // 🔵 트랜잭션 밖에서 next owner 후보 미리 조회
+            // =====================================================
+            let nextOwnerChar = null;
+
+            if (data.regionId && !data.regionId.endsWith("_DEFAULT")) {
+                const q = await db.collection("characters")
+                    .where("regionId", "==", data.regionId)
+                    .orderBy("rankScore", "desc")
+                    .get();
+
+                nextOwnerChar = q.docs
+                    .map(d => ({ id: d.id, ...d.data() }))
+                    .find(c => c.id !== id) || null;
+            }
+
+            // =====================================================
+            // 🔒 트랜잭션 시작
+            // =====================================================
             await db.runTransaction(async (tx) => {
+
+                // ---------- READ (모두 먼저) ----------
                 const charSnap = await tx.get(ref);
                 if (!charSnap.exists) throw "NO_CHAR";
 
                 const char = charSnap.data();
                 const regionId = char.regionId;
 
-                // 📌 regionId 없는 경우 → 캐릭터만 삭제
-                if (!regionId) {
-                    tx.delete(ref);
-                    return;
+                const userRef = db.collection("users").doc(uid);
+                const userSnap = await tx.get(userRef);
+                const currentCount =
+                    userSnap.exists ? userSnap.data().charCount || 0 : 0;
+
+                let regionRef = null;
+                let regionSnap = null;
+
+                if (regionId && !regionId.endsWith("_DEFAULT")) {
+                    regionRef = db.collection("regionsUsers").doc(regionId);
+                    regionSnap = await tx.get(regionRef);
                 }
 
-                const regionRef = db.collection("regionsUsers").doc(regionId);
-                const regionSnap = await tx.get(regionRef);
+                // ---------- WRITE (이제부터 write만) ----------
 
-                // 📌 region 문서 자체가 없으면 → 캐릭터만 삭제
-                if (!regionSnap.exists) {
-                    tx.delete(ref);
-                    return;
+                // 👤 charCount 감소
+                if (currentCount > 0) {
+                    tx.set(
+                        userRef,
+                        { charCount: currentCount - 1 },
+                        { merge: true }
+                    );
                 }
 
-                // 📌 default region → final.js 동일 규칙: 캐릭터만 삭제
-                if (regionId.endsWith("_DEFAULT")) {
-                    tx.delete(ref);
-                    return;
-                }
+                // region 처리
+                if (regionRef && regionSnap?.exists) {
+                    const region = regionSnap.data();
+                    const isOwnerChar = region.ownerchar?.id === id;
 
-                // =====================================================
-                // 🟦 default 가 아닌 경우에만 기존 owner/charnum 로직 수행
-                // =====================================================
+                    let update = {
+                        charnum: Math.max((region.charnum || 1) - 1, 0)
+                    };
 
-                const region = regionSnap.data();
-                const isOwnerChar = region.ownerchar?.id === id;
-
-                let update = {
-                    charnum: Math.max((region.charnum || 1) - 1, 0)
-                };
-
-                if (isOwnerChar) {
-                    const q = await db.collection("characters")
-                        .where("regionId", "==", regionId)
-                        .orderBy("rankScore", "desc")
-                        .get();
-
-                    const next = q.docs
-                        .map(d => ({ id: d.id, ...d.data() }))
-                        .find(c => c.id !== id);
-
-                    if (next) {
-                        update.owner = next.uid;
-                        update.ownerchar = { id: next.id, name: next.name };
-                    } else {
-                        update.ownerchar = null;
+                    if (isOwnerChar) {
+                        if (nextOwnerChar) {
+                            update.owner = nextOwnerChar.uid;
+                            update.ownerchar = {
+                                id: nextOwnerChar.id,
+                                name: nextOwnerChar.name
+                            };
+                        } else {
+                            update.ownerchar = null;
+                        }
                     }
+
+                    tx.update(regionRef, update);
                 }
 
-                tx.update(regionRef, update);
+                // 마지막에 캐릭터 삭제
                 tx.delete(ref);
             });
 
@@ -191,6 +224,7 @@ export default withApi("protected", async (req, res, { uid }) => {
 
 
         return res.status(405).json({ error: "지원하지 않는 메소드" });
+
 
     } catch (e) {
         console.error("CHARACTERS API ERROR:", e);

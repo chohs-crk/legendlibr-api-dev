@@ -1,9 +1,13 @@
-﻿export const config = { runtime: "nodejs" };
+﻿export const config = {
+    runtime: "nodejs",
+    compute: 1
+};
+
 
 import { withApi } from "../_utils/withApi.js";
 import { db } from "../../firebaseAdmin.js";
 import { ORIGINS } from "../base/data/origins.js";
-import { getSession, setSession, deleteSession } from "../base/sessionstore.js";
+import { getSession, setSession } from "../base/sessionstore.js";
 import { callAI } from "./ai.js";
 
 
@@ -15,6 +19,26 @@ export default withApi("expensive", async (req, res, { uid }) => {
     }
 
 
+    // === 0. 기존 세션 존재 여부 확인 ===
+    const existing = await getSession(uid);
+    if (existing) {
+        return res.status(409).json({
+            ok: false,
+            error: "SESSION_ALREADY_EXISTS"
+        });
+    }
+    // ===============================
+    // 🔒 charCount 제한 (10)
+    // ===============================
+    const userSnap = await db.collection("users").doc(uid).get();
+    const charCount = userSnap.exists ? userSnap.data().charCount || 0 : 0;
+
+    if (charCount >= 10) {
+        return res.status(403).json({
+            ok: false,
+            error: "CHARACTER_LIMIT_REACHED"
+        });
+    }
 
 
     // === 1. 입력값 파싱 ===
@@ -91,19 +115,19 @@ export default withApi("expensive", async (req, res, { uid }) => {
         return res.status(400).json({ ok: false, error: "MISMATCH_REGION" });
     }
 
-    // === 5. 기존 세션 존재 여부 ===
-    const existing = await getSession(uid);
-    if (existing) {
-        return res.status(409).json({ ok: false, error: "FLOW_ALREADY_EXISTS" });
-    }
-
-
-    // === 6. 세션 생성 === (구조 동일)
-    await deleteSession(uid);
+   
+    // === 6. 세션 생성 (세션 없을 때만) ===
     await setSession(uid, {
-        nowFlow: { refine: true, story1: false, story2: false, story3: false, final: false },
+        nowFlow: {
+            refine: true,
+            story1: false,
+            story2: false,
+            story3: false,
+            final: false
+        },
         called: false,
         resed: false,
+        lastCall: 0,
         input: {
             origin: originData,
             region: { ...regionData, id: regionId },
@@ -113,20 +137,31 @@ export default withApi("expensive", async (req, res, { uid }) => {
         output: {}
     });
 
+
+
     console.log("[prompt-init] session created:", uid);
 
     // === 7. AI 호출을 이 요청 안에서 직접 수행 ===
     try {
         console.log("[prompt-init] calling callAI(uid):", uid);
-        await callAI(uid);  // <-- 여기서 OpenAI 호출 완료까지 기다림
+        try {
+            await callAI(uid);
 
-        // callAI 안에서 세션 상태가 refine -> story1 로 바뀜
-        // s.output 도 채워진 상태
-        return res.status(200).json({
-            ok: true,
-            flow: "refine",
-            // 필요하면 여기서 세션 결과 일부도 같이 내려줄 수 있음
-        });
+            return res.status(200).json({
+                ok: true,
+                flow: "refine"
+            });
+
+        } catch (err) {
+            console.error("[prompt-init][REFINE BLOCKED]", err.message);
+
+            return res.status(400).json({
+                ok: false,
+                error: err.message || "REFINE_BLOCKED"
+            });
+        }
+
+
     } catch (err) {
         console.error("[prompt-init] callAI ERROR:", err);
         return res.status(500).json({

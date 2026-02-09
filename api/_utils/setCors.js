@@ -2,7 +2,7 @@
 
 export function setCors(req, res) {
     const origin = req.headers.origin;
-    const allowedOrigin = process.env.APP_ORIGIN || "https://legendlibr.web.app";
+    const allowedOrigin = process.env.APP_ORIGIN || "https://mythticstory.web.app";
 
     // 브라우저 요청이고, 허용되지 않은 origin이면 차단
     if (origin && origin !== allowedOrigin) {

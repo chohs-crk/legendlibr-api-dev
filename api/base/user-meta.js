@@ -40,6 +40,9 @@ export default withApi("protected", async (req, res, { uid }) => {
                 scroll: d.currency?.scroll ?? 0,
                 frame: d.currency?.frame ?? 0
             };
+
+
+       
             await ref.update({
  updatedAt: new Date()
                });

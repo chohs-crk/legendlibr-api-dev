@@ -4,7 +4,7 @@ import { db } from "../../firebaseAdmin.js";
 import { applyUserMetaDelta } from "./_internal/user-meta-update.js";
 import { SAFETY_RULES } from "../base/safetyrules.js";
 import { ORIGINS } from "../base/data/origins.js";
-
+import { randomUUID } from "crypto";
 /* =========================
    스타일 매핑 (Gemini 전용)
 ========================= */
@@ -98,9 +98,17 @@ JSON만 출력한다.
 /* =========================
    Gemini
 ========================= */
+/* =========================
+   Gemini (2026.01.19 수정됨)
+========================= */
 async function generateImageWithGemini(prompt) {
+    // 1. 모델명: 1월 15일 셧다운된 preview 대신 '정식 버전' 사용
+    // 2. API 버전: 이미지 생성 기능이 포함된 'v1beta' 사용 필수
+    const MODEL_ID = "gemini-2.5-flash-image";
+    const API_VERSION = "v1beta";
+
     const res = await fetch(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent",
+        `https://generativelanguage.googleapis.com/${API_VERSION}/models/${MODEL_ID}:generateContent`,
         {
             method: "POST",
             headers: {
@@ -108,16 +116,30 @@ async function generateImageWithGemini(prompt) {
                 "x-goog-api-key": process.env.GEMINI_API_KEY
             },
             body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }]
+                contents: [{ parts: [{ text: prompt }] }],
+                // 중요: 이미지 출력을 명시적으로 요청 (v1beta 기능)
+                generationConfig: {
+                    responseModalities: ["IMAGE"]
+                }
             })
         }
     );
 
     const json = await res.json();
+
+    if (json.error) {
+        console.error("Gemini API Error Detail:", JSON.stringify(json.error, null, 2));
+        throw new Error(`GEMINI_API_ERROR: ${json.error.message}`);
+    }
+
+    // 응답 구조 확인 (이미지는 inlineData 형태로 반환됨)
     const part = json.candidates?.[0]?.content?.parts
         ?.find(p => p.inlineData?.data);
 
-    if (!part) throw new Error("GEMINI_IMAGE_FAILED");
+    if (!part) {
+        throw new Error("GEMINI_IMAGE_FAILED: No image data returned. Check prompt safety or model availability.");
+    }
+
     return Buffer.from(part.inlineData.data, "base64");
 }
 
@@ -143,7 +165,7 @@ export default withApi("expensive", async (req, res, { uid }) => {
 
     const result = await buildImagePromptAndScore({
         promptRefined: data.promptRefined,
-        finalStory: data.finalStory,
+        fullStory: data.fullStory ?? data.finalStory,
         userPrompt: prompt
     });
 
@@ -176,14 +198,30 @@ ${CHARACTER_FOCUS_PROMPT}
 ${STYLE_PROMPTS[style] || ""}
 `;
 
+    
+
     const buffer = await generateImageWithGemini(finalPrompt);
 
     const bucket = admin.storage().bucket();
     const path = `characters/${id}/ai/${Date.now()}.png`;
-    await bucket.file(path).save(buffer, { public: true });
 
+    // ✅ download token 생성
+    const token = randomUUID();
+
+    // ✅ Firebase Storage에서 브라우저가 바로 열 수 있게 토큰 메타데이터 부여
+    await bucket.file(path).save(buffer, {
+        metadata: {
+            contentType: "image/png",
+            metadata: {
+                firebaseStorageDownloadTokens: token
+            }
+        }
+    });
+
+    // ✅ 토큰 포함 URL (브라우저 <img>에서 즉시 로딩됨)
     const url =
-        `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media`;
+        `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media&token=${token}`;
+
 
     await ref.update({
         image: { type: "ai", key: "ai", url },
