@@ -375,24 +375,25 @@ traits 규칙:
         ------------------------- */
         try {
             const regionId = input.region?.id;
-            if (!regionId || regionId.endsWith("_DEFAULT")) return;
+            if (regionId && !regionId.endsWith("_DEFAULT")) {
+                const regionRef = db.collection("regionsUsers").doc(regionId);
+                const snap = await regionRef.get();
+                if (snap.exists) {
+                    const data = snap.data();
+                    const currentNum = data.charnum || 0;
 
-            const regionRef = db.collection("regionsUsers").doc(regionId);
-            const snap = await regionRef.get();
-            if (!snap.exists) throw "REGION_NOT_FOUND";
+                    const updateData = { charnum: currentNum + 1 };
+                    if (currentNum === 0) {
+                        updateData.ownerchar = {
+                            name: output.name,
+                            id: ref.id
+                        };
+                    }
 
-            const data = snap.data();
-            const currentNum = data.charnum || 0;
-
-            const updateData = { charnum: currentNum + 1 };
-            if (currentNum === 0) {
-                updateData.ownerchar = {
-                    name: output.name,
-                    id: ref.id
-                };
+                    await regionRef.update(updateData);
+                }
             }
 
-            await regionRef.update(updateData);
         } catch (err) {
             console.error("REGION_UPDATE_FAIL:", err);
         }

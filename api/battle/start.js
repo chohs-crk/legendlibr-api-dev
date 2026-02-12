@@ -3,7 +3,7 @@ export const config = { runtime: "nodejs" };
 
 import { withApi } from "../_utils/withApi.js";
 import { db } from "../../firebaseAdmin.js";
-
+import { deleteBattleSession } from "../base/sessionstore.js";
 export default withApi("battle_start", async (req, res, { uid }) => {
     if (req.method !== "POST") {
         return res.status(405).json({ ok: false, error: "POST_ONLY" });
@@ -60,7 +60,7 @@ export default withApi("battle_start", async (req, res, { uid }) => {
         });
 
         // ⭐ Redis battle session 초기화 (기존 전투 세션 제거)
-        import { deleteBattleSession } from "../base/sessionstore.js";
+        
         await deleteBattleSession(uid);
 
 
