@@ -14,11 +14,54 @@ import {
     buildFinalStatsPrompt
 } from "./final.prompt.js";
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
 
 /* =========================
    HANDLER
 ========================= */
+async function callGeminiJSON(systemText, userText, temperature = 0.4) {
+    const MODEL_ID = "gemini-2.5-flash-lite";
+    const API_VERSION = "v1beta";
+
+    const res = await fetch(
+        `https://generativelanguage.googleapis.com/${API_VERSION}/models/${MODEL_ID}:generateContent`,
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "x-goog-api-key": process.env.GEMINI_API_KEY
+            },
+            body: JSON.stringify({
+                systemInstruction: {
+                    parts: [{ text: systemText }]
+                },
+                contents: [
+                    {
+                        role: "user",
+                        parts: [{ text: userText }]
+                    }
+                ],
+                generationConfig: {
+                    temperature,
+                    topP: 0.9,
+                    maxOutputTokens: 2048
+                }
+            })
+        }
+    );
+
+    if (!res.ok) throw new Error("GEMINI_REQUEST_FAILED");
+
+    const data = await res.json();
+
+    const text =
+        data.candidates?.[0]?.content?.parts
+            ?.map(p => p.text || "")
+            .join("") || "{}";
+
+    return text.replace(/```json|```/g, "").trim();
+}
+
 export default withApi("expensive", async (req, res, { uid }) => {
     let s;
 
@@ -85,24 +128,14 @@ export default withApi("expensive", async (req, res, { uid }) => {
             endingType
         });
 
-        const aiRes1 = await fetch("https://api.openai.com/v1/chat/completions", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${OPENAI_API_KEY}`
-            },
-            body: JSON.stringify({
-                model: "gpt-4o-mini",
-                temperature: 0.4,
-                messages: [
-                    { role: "system", content: SYSTEM_FOR_FINAL },
-                    { role: "user", content: prompt1 }
-                ]
-            })
-        });
+        const raw1 = await callGeminiJSON(
+            SYSTEM_FOR_FINAL,
+            prompt1,
+            0.4
+        );
 
-        const aiJson1 = await aiRes1.json();
-        let raw1 = aiJson1?.choices?.[0]?.message?.content || "{}";
+
+       
         raw1 = raw1.replace(/```json|```/g, "").trim();
 
         let result1;
@@ -213,19 +246,8 @@ export default withApi("expensive", async (req, res, { uid }) => {
             fullStory
         });
 
-        const aiRes2 = await fetch("https://api.openai.com/v1/chat/completions", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${OPENAI_API_KEY}`
-            },
-            body: JSON.stringify({
-                model: "gpt-4o-mini",
-                temperature: 0.4,
-                messages: [
-                    {
-                        role: "system",
-                        content: `
+        const raw2 = await callGeminiJSON(
+            `
 반드시 JSON만 반환한다.
 
 [점수 체계 규칙]
@@ -265,15 +287,13 @@ traits 규칙:
 - physical, intellectual은 1~10 정수
 - alignment는 반드시 선 / 중립 / 악 중 하나
 - growth는 최대 3문장
-`
-                    },
-                    { role: "user", content: prompt2 }
-                ]
-            })
-        });
+`,
+            prompt2,
+            0.4
+        );
 
-        const aiJson2 = await aiRes2.json();
-        let raw2 = aiJson2?.choices?.[0]?.message?.content || "{}";
+
+        
         raw2 = raw2.replace(/```json|```/g, "").trim();
 
         let result2;

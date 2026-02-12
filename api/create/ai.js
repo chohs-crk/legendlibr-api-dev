@@ -23,9 +23,9 @@ ${SAFETY_RULES}
 코드블록( \`\`\` ) 도 금지한다.
 
 {
-  "nameSafetyScore": 0,
-  "promptSafetyScore": 0,
-  "copyrightScore": 0,
+  "nameSafetyScore": 숫자,
+  "promptSafetyScore": 숫자,
+  "copyrightScore": 숫자,
 
   "name": "실제 캐릭터 본명",
 
@@ -123,7 +123,7 @@ ${SAFETY_RULES}
 ────────────────
 - "소설에 나오는 캐릭터 소개" 같은 느낌으로 작성한다.
 - 유저 입력의 구조와 핵심 키워드를 최대한 유지한다.
-- 정확히 9~11문장으로 작성한다. (권장 10문장)
+- 정확히 7~9문장으로 작성한다. (권장 8문장)
 
 ────────────────
 [서사 표현 규칙]
@@ -240,24 +240,47 @@ ${prompt}
 소개글 길이 힌트: 약 ${length}자
 `;
     try {
-        const res = await fetch("https://api.openai.com/v1/chat/completions", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`
-            },
-            body: JSON.stringify({
-                model: "gpt-4o-mini",
-                temperature: 0.6,
-                messages: [
-                    { role: "system", content: SYSTEM_PROMPT },
-                    { role: "user", content: userPrompt }
-                ]
-            })
-        });
+        const MODEL_ID = "gemini-2.5-flash-lite";
+        const API_VERSION = "v1beta";
+
+        const res = await fetch(
+            `https://generativelanguage.googleapis.com/${API_VERSION}/models/${MODEL_ID}:generateContent`,
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "x-goog-api-key": process.env.GEMINI_API_KEY
+                },
+                body: JSON.stringify({
+                    systemInstruction: {
+                        parts: [{ text: SYSTEM_PROMPT }]
+                    },
+                    contents: [
+                        {
+                            role: "user",
+                            parts: [{ text: userPrompt }]
+                        }
+                    ],
+                    generationConfig: {
+                        temperature: 0.6,
+                        topP: 0.9,
+                        maxOutputTokens: 2048
+                    }
+                })
+            }
+        );
+
+        if (!res.ok) {
+            throw new Error("GEMINI_REQUEST_FAILED");
+        }
 
         const data = await res.json();
-        const text = data.choices?.[0]?.message?.content;
+
+        const text =
+            data.candidates?.[0]?.content?.parts
+                ?.map(p => p.text || "")
+                .join("") || null;
+
 
         /* =========================
            🤖 AI RAW RESPONSE LOG
@@ -281,7 +304,9 @@ ${prompt}
         ========================= */
         let parsed;
         try {
-            parsed = JSON.parse(text);
+            const cleaned = text.replace(/```json|```/g, "").trim();
+            parsed = JSON.parse(cleaned);
+
         } catch (e) {
             console.error("[AI][JSON_PARSE_FAIL]", { uid, text });
             await deleteSession(uid);

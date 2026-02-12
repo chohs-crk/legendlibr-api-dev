@@ -172,8 +172,11 @@ export async function callStoryAIStream(uid, onDelta, prompt) {
 
         buffer += decoder.decode(value, { stream: true });
 
-        // Gemini 스트리밍은 줄 단위 JSON 객체로 내려옴
+        // 줄 단위 분리
         const lines = buffer.split("\n");
+
+        // 마지막 줄은 완전하지 않을 수 있으므로 남겨둔다
+        buffer = lines.pop();
 
         for (const line of lines) {
             const trimmed = line.trim();
@@ -190,11 +193,11 @@ export async function callStoryAIStream(uid, onDelta, prompt) {
                         onDelta(part.text);
                     }
                 }
-            } catch {
-                // JSON이 아직 완성되지 않은 경우 무시
+            } catch (err) {
+                // 파싱 실패 시 로그만 남기고 계속
+                console.warn("[STREAM_PARSE_FAIL]", trimmed);
             }
         }
-
-        buffer = "";
     }
+
 }

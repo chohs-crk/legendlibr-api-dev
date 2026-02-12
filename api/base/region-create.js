@@ -4,11 +4,8 @@
 
 import { withApi } from "../_utils/withApi.js";
 import { db } from "../../firebaseAdmin.js";
-import fetch from "node-fetch";
 import { ORIGINS } from "../base/data/origins.js";
 import { SAFETY_RULES } from "../base/safetyrules.js";
-
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY?.trim();
 
 // =========================
 // JSON 정리 공통 함수
@@ -30,6 +27,55 @@ function safeJsonParse(raw) {
 }
 
 // =========================
+// Gemini JSON 호출 공통 함수
+// =========================
+async function callGeminiJSON(prompt, temperature = 0.4) {
+    const MODEL_ID = "gemini-2.5-flash-lite";
+    const API_VERSION = "v1beta";
+
+    const res = await fetch(
+        `https://generativelanguage.googleapis.com/${API_VERSION}/models/${MODEL_ID}:generateContent`,
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "x-goog-api-key": process.env.GEMINI_API_KEY
+            },
+            body: JSON.stringify({
+                contents: [
+                    {
+                        role: "user",
+                        parts: [{ text: prompt }]
+                    }
+                ],
+                generationConfig: {
+                    temperature,
+                    topP: 0.9,
+                    maxOutputTokens: 2048
+                }
+            })
+        }
+    );
+
+    if (!res.ok) {
+        throw new Error("GEMINI_REQUEST_FAILED");
+    }
+
+    const data = await res.json();
+
+    const text =
+        data.candidates?.[0]?.content?.parts
+            ?.map(p => p.text || "")
+            .join("") || "";
+
+    if (!text) {
+        throw new Error("AI_EMPTY_RESPONSE");
+    }
+
+    return text;
+}
+
+// =========================
 // 메인 핸들러
 // =========================
 export default withApi("expensive", async (req, res, { uid }) => {
@@ -42,17 +88,11 @@ export default withApi("expensive", async (req, res, { uid }) => {
         return res.status(400).json({ ok: false, error: "INVALID_INPUT" });
     }
 
-    // ===============================
-    // origin 정보 확인
-    // ===============================
     const originData = ORIGINS[originId];
     if (!originData) {
         return res.status(400).json({ ok: false, error: "INVALID_ORIGIN" });
     }
 
-    // ===============================
-    // 🎯 detail 정제 + 🔒 검열 + 언어 판단 (통합 AI 호출)
-    // ===============================
     let refinedDetail = detail;
 
     let safetyResult = {
@@ -64,6 +104,9 @@ export default withApi("expensive", async (req, res, { uid }) => {
     };
 
     try {
+        // ===============================
+        // 🎯 기존 프롬프트 내용 그대로 유지
+        // ===============================
         const prompt = `
 ${SAFETY_RULES}
 
@@ -120,7 +163,6 @@ copyrightScore:
 
 - 특수문자로만 구성된 이름도 needKorean = true
 
-
 ────────────────
 [koreanName 생성 규칙]
 ────────────────
@@ -156,37 +198,14 @@ ${detail}
 }
 `;
 
-        const r = await fetch("https://api.openai.com/v1/chat/completions", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${OPENAI_API_KEY}`
-            },
-            body: JSON.stringify({
-                model: "gpt-4o-mini",
-                temperature: 0.4,
-                messages: [{ role: "user", content: prompt }]
-            })
-        });
-
-        const j = await r.json();
-
-        const raw = j.choices?.[0]?.message?.content;
-        if (!raw) {
-            throw new Error("AI_EMPTY_RESPONSE");
-        }
-
+        const raw = await callGeminiJSON(prompt, 0.4);
         const parsed = safeJsonParse(raw);
 
         if (!parsed || typeof parsed !== "object" || !parsed.refinedDetail) {
             throw new Error("AI_RESPONSE_INVALID");
         }
 
-
-
-        if (parsed.refinedDetail) {
-            refinedDetail = parsed.refinedDetail.trim();
-        }
+        refinedDetail = parsed.refinedDetail.trim();
 
         safetyResult = {
             nameSafetyScore: Number(parsed.nameSafetyScore) || 0,
@@ -196,25 +215,16 @@ ${detail}
             koreanName: parsed.koreanName || name
         };
 
-        console.log("[REGION][REFINE+SAFETY]", {
-            uid,
-            safetyResult
-        });
-
     } catch (err) {
         console.error("[REGION][AI REFINE FAIL]", err);
-
-        const code = err.message || "AI_CALL_FAILED";
-
         return res.status(500).json({
             ok: false,
-            error: code
+            error: err.message || "AI_CALL_FAILED"
         });
     }
 
-
     // ===============================
-    // 🔒 점수 기준 초과 시 차단
+    // 🔒 점수 기준 차단
     // ===============================
     if (safetyResult.nameSafetyScore >= 60) {
         return res.status(400).json({ ok: false, error: "REGION_NAME_UNSAFE" });
@@ -229,7 +239,7 @@ ${detail}
     }
 
     // ===============================
-    // ⭐ 세계관 적합도 평가 (1~10점)
+    // ⭐ 세계관 적합도 평가 (프롬프트 그대로 유지)
     // ===============================
     let originScore = 5;
 
@@ -251,52 +261,32 @@ ${originData.longDesc}
 ${refinedDetail}
 `;
 
-        const r2 = await fetch("https://api.openai.com/v1/chat/completions", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${OPENAI_API_KEY}`
-            },
-            body: JSON.stringify({
-                model: "gpt-4o-mini",
-                messages: [{ role: "user", content: scorePrompt }],
-                temperature: 0.2
-            })
-        });
-
-        const j2 = await r2.json();
-        const raw2 = j2.choices?.[0]?.message?.content || "{}";
+        const raw2 = await callGeminiJSON(scorePrompt, 0.2);
         const parsed2 = safeJsonParse(raw2);
 
         if (parsed2.score) {
             originScore = Math.max(1, Math.min(10, Number(parsed2.score)));
         }
+
     } catch (err) {
         console.error("originScore 계산 실패:", err);
     }
 
-    // ===============================
-    // Firestore 저장
-    // ===============================
     try {
         const regionRef = db.collection("regionsUsers").doc();
 
         await regionRef.set({
             originId,
-
             name,
             koreanName: safetyResult.koreanName,
             needKorean: safetyResult.needKorean,
-
             safety: {
                 nameSafetyScore: safetyResult.nameSafetyScore,
                 detailSafetyScore: safetyResult.detailSafetyScore,
                 copyrightScore: safetyResult.copyrightScore
             },
-
             detail: refinedDetail,
             score: originScore,
-
             owner: uid,
             ownerchar: null,
             charnum: 0,
