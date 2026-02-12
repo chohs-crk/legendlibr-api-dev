@@ -24,6 +24,7 @@ export default withApi("protected", async (req, res, { uid }) => {
         called: s.called || false,
         resed: s.resed || false,
         intro: s.output?.intro || "",
+        rawName: s.input.name,
         isFinalFF,
         remain: s.called && !s.resed
             ? Math.max(0, 30000 - (Date.now() - s.lastCall))
