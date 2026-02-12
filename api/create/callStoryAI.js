@@ -172,18 +172,17 @@ export async function callStoryAIStream(uid, onDelta, prompt) {
 
         buffer += decoder.decode(value, { stream: true });
 
-        // JSON 객체 단위로 추출
-        let start;
-        let end;
+        const lines = buffer.split("\n");
+        buffer = lines.pop(); // 마지막 incomplete 줄 보관
 
-        while (
-            (start = buffer.indexOf("{")) !== -1 &&
-            (end = buffer.indexOf("}", start)) !== -1
-        ) {
-            const candidate = buffer.slice(start, end + 1);
+        for (const line of lines) {
+            if (!line.startsWith("data:")) continue;
+
+            const payload = line.slice(5).trim();
+            if (!payload) continue;
 
             try {
-                const json = JSON.parse(candidate);
+                const json = JSON.parse(payload);
 
                 const parts =
                     json.candidates?.[0]?.content?.parts || [];
@@ -193,14 +192,12 @@ export async function callStoryAIStream(uid, onDelta, prompt) {
                         onDelta(part.text);
                     }
                 }
-
-                buffer = buffer.slice(end + 1);
             } catch {
-                // 아직 완전한 JSON이 아님
-                break;
+                // 아직 완전한 JSON 아님
             }
         }
     }
+
 
 
 }
