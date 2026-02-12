@@ -53,3 +53,16 @@ Rewrite Instruction:
 
 -At least two of the following must be altered: the core logic of the world, the source of power, or the organizational structure.
 `;
+export const SAFETY_RULES_AFTER = `
+Language Rules:
+- All output MUST be written in Hangul characters only.
+- No English letters are allowed.
+- Korean loanwords written phonetically are acceptable.
+- Natural fluency is optional; clarity takes priority.
+- 한자(例: 思, 忠, 戦), 일본어(例: の, で), 중국어(例: 的, 我), 영어(例: a, b, c) 등은 한글 표기가 병렬로 같이 이루어져야 한다
+- 외래어는 가급적 한글 표기(예: magic->매직, Knights->기사단)로만 작성한다
+
+Creative Rules:
+- Maintain strict internal genre consistency (fantasy, 무협, SF, etc.).
+- Do not break the established tone of the characters.
+`;

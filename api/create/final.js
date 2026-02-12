@@ -53,7 +53,10 @@ async function callGeminiJSON(systemText, userText, temperature = 0.4) {
     if (!res.ok) throw new Error("GEMINI_REQUEST_FAILED");
 
     const data = await res.json();
-
+    // 🔒 Gemini 빈 응답 보호
+    if (!data.candidates || !data.candidates.length) {
+        throw new Error("GEMINI_EMPTY_RESPONSE");
+    }
     const text =
         data.candidates?.[0]?.content?.parts
             ?.map(p => p.text || "")
@@ -123,10 +126,12 @@ export default withApi("expensive", async (req, res, { uid }) => {
            AI CALL #1 : ENDING + FEATURES
         ------------------------- */
         const prompt1 = buildFinalEndingPrompt({
+            input,
             output,
             selected: s.selected,
             endingType
         });
+
 
         const raw1 = await callGeminiJSON(
             SYSTEM_FOR_FINAL,
@@ -136,7 +141,7 @@ export default withApi("expensive", async (req, res, { uid }) => {
 
 
        
-        raw1 = raw1.replace(/```json|```/g, "").trim();
+       
 
         let result1;
         try {
@@ -158,19 +163,51 @@ export default withApi("expensive", async (req, res, { uid }) => {
         ------------------------- */
         const fullStory = [
             output.story1?.story || "",
-            output.story1?.choices[s.selected?.story1]?.text || "",
-
             output.story2?.story || "",
-            output.story2?.choices[s.selected?.story2]?.text || "",
-
             output.story3?.story || "",
-            output.story3?.choices[s.selected?.story3]?.text || "",
-
             ending
         ]
             .join(" ")
             .replace(/\s+/g, " ")
             .trim();
+        const formattedStory = formatFinalStory(fullStory);
+        function formatFinalStory(text) {
+            let result = "";
+            let sentenceCount = 0;
+            let inDialogue = false;
+
+            for (let i = 0; i < text.length; i++) {
+                const ch = text[i];
+
+                // 대사 시작/끝
+                if (ch === "§") {
+                    inDialogue = !inDialogue;
+                    sentenceCount = 0;
+                    result += "\n\n" + ch;
+                    continue;
+                }
+
+                result += ch;
+
+                // 마침표 하나일 경우만 카운트
+                if (
+                    ch === "." &&
+                    text[i + 1] !== "." &&
+                    text[i - 1] !== "."
+                ) {
+                    sentenceCount++;
+                }
+
+                // 세 문장마다 줄바꿈
+                if (!inDialogue && sentenceCount === 3) {
+                    result += "\n";
+                    sentenceCount = 0;
+                }
+            }
+
+            return result.trim();
+        }
+
 
         function assertValidEnding(result) {
             if (!result || typeof result !== "object") {
@@ -294,7 +331,7 @@ traits 규칙:
 
 
         
-        raw2 = raw2.replace(/```json|```/g, "").trim();
+ 
 
         let result2;
         try {
@@ -321,7 +358,7 @@ traits 규칙:
             ===================== */
             displayRawName: input.name,
             name: output.name,
-            koreanName: output.koreanName || "",
+         
             needKorean: !!output.needKorean,
 
             /* =====================
@@ -330,7 +367,7 @@ traits 규칙:
             safety: {
                 nameSafetyScore: output.nameSafetyScore ?? 0,
                 promptSafetyScore: output.promptSafetyScore ?? 0,
-                copyrightScore: output.copyrightScore ?? 0
+           
             },
 
             /* =====================
@@ -343,6 +380,7 @@ traits 규칙:
                📖 CHARACTER META
             ===================== */
             existence: output.existence,
+            canSpeak: !!output.canSpeak,
             narrationStyle: output.narrationStyle,
             speechStyle: output.speechStyle,
 
@@ -357,7 +395,8 @@ traits 규칙:
             /* =====================
                📚 STORY
             ===================== */
-            fullStory,
+            fullStory: formattedStory,
+
             features,
             storyTheme: output.theme || "",
             storyScore,
@@ -417,7 +456,7 @@ traits 규칙:
         } catch (err) {
             console.error("REGION_UPDATE_FAIL:", err);
         }
-        await deleteSession(uid);
+       
         return res.json({
             ok: true,
             id: ref.id,
@@ -431,8 +470,8 @@ traits 규칙:
             error: "FINAL_FAILED"
         });
     } finally {
-        if (s) {
+       
             await deleteSession(uid);
-        }
+        
     }
 });

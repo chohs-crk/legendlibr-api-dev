@@ -1,6 +1,7 @@
 ﻿// /api/create/callStoryAI.js
 
-import { SAFETY_RULES } from "../base/safetyrules.js";
+import { SAFETY_RULES_AFTER } from "../base/safetyrules.js";
+
 
 export const SYSTEM_FOR_STORY = `
 다음 규칙을 "절대" 위반하지 않는다.
@@ -117,7 +118,8 @@ export const SYSTEM_FOR_STORY = `
 
 규칙을 어기면 출력은 무효이며 재작성해야 한다.
 
-${SAFETY_RULES}
+${SAFETY_RULES_AFTER}
+
 `;
 
 
@@ -130,8 +132,9 @@ export async function callStoryAIStream(uid, onDelta, prompt) {
     const MODEL_ID = "gemini-2.5-flash-lite";
     const API_VERSION = "v1beta";
 
+    // ✅ 변경: URL 끝에 ?alt=sse를 추가하여 데이터 형식을 강제함
     const res = await fetch(
-        `https://generativelanguage.googleapis.com/${API_VERSION}/models/${MODEL_ID}:streamGenerateContent`,
+        `https://generativelanguage.googleapis.com/${API_VERSION}/models/${MODEL_ID}:streamGenerateContent?alt=sse`,
         {
             method: "POST",
             headers: {
@@ -142,12 +145,7 @@ export async function callStoryAIStream(uid, onDelta, prompt) {
                 systemInstruction: {
                     parts: [{ text: SYSTEM_FOR_STORY }]
                 },
-                contents: [
-                    {
-                        role: "user",
-                        parts: [{ text: prompt }]
-                    }
-                ],
+                contents: [{ role: "user", parts: [{ text: prompt }] }],
                 generationConfig: {
                     temperature: 0.7,
                     topP: 0.9,
@@ -157,13 +155,10 @@ export async function callStoryAIStream(uid, onDelta, prompt) {
         }
     );
 
-    if (!res.ok) {
-        throw new Error("GEMINI_REQUEST_FAILED");
-    }
+    if (!res.ok) throw new Error("GEMINI_REQUEST_FAILED");
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
-
     let buffer = "";
 
     while (true) {
@@ -171,33 +166,25 @@ export async function callStoryAIStream(uid, onDelta, prompt) {
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-
         const lines = buffer.split("\n");
-        buffer = lines.pop(); // 마지막 incomplete 줄 보관
+        buffer = lines.pop();
 
         for (const line of lines) {
-            if (!line.startsWith("data:")) continue;
+            const trimmedLine = line.trim();
+            // ✅ 변경: SSE 형식의 'data: ' 접두사를 확인하고 파싱
+            if (!trimmedLine || !trimmedLine.startsWith("data:")) continue;
 
-            const payload = line.slice(5).trim();
-            if (!payload) continue;
-
+            const payload = trimmedLine.slice(5).trim();
             try {
                 const json = JSON.parse(payload);
-
-                const parts =
-                    json.candidates?.[0]?.content?.parts || [];
-
-                for (const part of parts) {
-                    if (part.text) {
-                        onDelta(part.text);
-                    }
+                // ✅ 변경: Gemini v1beta의 스트리밍 JSON 구조에 맞게 텍스트 추출
+                const textChunk = json.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (textChunk) {
+                    onDelta(textChunk);
                 }
-            } catch {
-                // 아직 완전한 JSON 아님
+            } catch (e) {
+                // 불완전한 JSON의 경우 무시
             }
         }
     }
-
-
-
 }

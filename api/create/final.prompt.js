@@ -1,10 +1,13 @@
-import { SAFETY_RULES } from "../base/safetyrules.js";
+import { SAFETY_RULES_AFTER } from "../base/safetyrules.js";
+
+
 
 /* =========================
    SYSTEM PROMPT
 ========================= */
 export const SYSTEM_FOR_FINAL = `
-${SAFETY_RULES}
+${SAFETY_RULES_AFTER}
+
 
 너는 TRPG 캐릭터 이야기의 결말을 작성하는 AI이다.
 
@@ -18,10 +21,14 @@ ${SAFETY_RULES}
 - 공백과 문장부호만 허용
 
 [서사 규칙]
-- 결말은 반드시 ** 8문장 이내**로 작성한다
+- 결말은 반드시 6문장 이상 8문장 이내로 작성한다
+- 전체 분량은 최소 약 200자 이상이 되도록 충분히 서술한다
 - 이미 진행된 이야기를 바탕으로 마지막 상태만 서술한다
-- 감정의 귀결, 인물의 상태, 세계의 변화 중 핵심만 다룬다
+- 감정의 귀결, 인물의 상태, 세계의 변화를 함께 다룬다
+- origin은 이 인물이 속한 전체 세계관과 시대적 배경이다
+- region은 그 세계관 안에 존재하는 구체적인 공간이다
 - 새로운 설정이나 인물을 추가하지 않는다
+
 
 [중요 금지 규칙]
 - 결말 방향, 비극, 성취, 방향, 유형, 점수와 같은
@@ -42,7 +49,7 @@ ${SAFETY_RULES}
 
 [출력 스키마]
 {
-  "ending": "결말 서사 (서사 문장, 최소 6문장 이상)",
+  "ending": "결말 서사 (서사적인 문장 최소 6문장 이상 8문장 정도)",
   "features": ["특징1","특징2","특징3","특징4","특징5"]
 }
 `;
@@ -52,6 +59,7 @@ ${SAFETY_RULES}
    PROMPT #1 : ENDING
 ========================= */
 export function buildFinalEndingPrompt({
+    input,
     output,
     selected,
     endingType
@@ -61,7 +69,7 @@ export function buildFinalEndingPrompt({
 이름: ${output.name}
 소개: ${output.intro}
 존재 형태: ${output.existence}
-발화 가능 여부: ${output.canSpeak ? "가능" : "불가"}
+발화 가능 여부: ${output.canSpeak ? "가능, 대사를 작성할 수 있다" : "불가, 캐릭터가 직접 대사를 하는 걸 작성하면 안된다"}
 
 서술 문체:
 ${output.narrationStyle}
@@ -72,6 +80,21 @@ ${output.speechStyle}
 [주제]
 ${output.theme}
 
+※ 위 주제는 이 이야기의 핵심 갈등과 방향성을 나타낸다.
+※ 결말은 반드시 이 주제의 귀결을 보여주어야 한다.
+※ 단, 주제를 직접 설명하거나 반복하지 말고
+   인물의 상태 변화와 장면을 통해 드러내야 한다.
+※ 주제에 포함된 감정, 가치관, 갈등 요소 중 최소 하나 이상이
+   결말에서 명확히 드러나야 한다.
+
+
+[세계 배경]
+기원: ${input.origin?.name} - ${input.origin?.desc}
+지역: ${input.region?.name} - ${input.region?.detail}
+
+※ 기원은 이 인물이 속한 전체 세계관과 시대적 배경이다.
+※ 지역은 그 세계관 안에 존재하는 구체적인 장소이다.
+※ 결말에는 이 둘의 관계가 자연스럽게 드러나야 한다.
 [이전 이야기 흐름]
 ${output.story1?.story || ""}
 ${output.story2?.story || ""}

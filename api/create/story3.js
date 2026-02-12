@@ -96,17 +96,36 @@ ${narrationStyle}
 - 발화 불가인 경우, 침묵·행동·환경 변화로만 표현한다
 - 결말을 말하지 말고, 바로 직전에서 멈춘다
 
+[연속성 엄수 규칙]
+
+- 이전 서사를 절대 반복하거나 재서술하지 않는다
+- 동일한 문장을 변형하여 다시 쓰지 않는다
+- 이미 언급된 설정을 다시 설명하지 않는다
+- 이야기는 반드시 직전 사건의 '이후 시점'에서 시작한다
+- 이전 이야기의 마지막 문장 직후부터 이어진다고 가정한다
+
 [세계 배경 참고]
-기원: ${origin.name}
-지역: ${region.name}
+- origin은 이 인물이 속한 전체 세계관과 시대적 배경이다
+- region은 그 세계관 안에 존재하는 구체적인 공간이다
+기원: ${origin.name} - ${origin.desc}
+지역: ${region.name} - ${region.detail}
+
 
 [주제]
 ${theme}
 
+※ 위 주제는 이 이야기의 핵심 갈등과 방향성을 나타낸다.
+※ 결말은 반드시 이 주제의 귀결을 보여주어야 한다.
+※ 단, 주제를 직접 설명하거나 반복하지 말고
+   인물의 상태 변화와 장면을 통해 드러내야 한다.
+※ 주제에 포함된 감정, 가치관, 갈등 요소 중 최소 하나 이상이
+   결말에서 명확히 드러나야 한다.
+
+
 [절대 금지]
 - 결말 서술
-- 교훈 정리
-- 선택, 결단, 다음 행동 암시
+- 억지 교훈적인 내용
+- 선택, 결단, 다음 행동 암시에 관한 서술
 `;
 }
 
@@ -136,74 +155,57 @@ async function stream(uid, s, res) {
         "Connection": "keep-alive"
     });
 
-    // ★ TF 상태 즉시 저장
     s.called = true;
     s.resed = false;
     s.lastCall = Date.now();
     await setSession(uid, s);
 
     let full = "";
-    let sentenceBuffer = ""; // 문장을 만들기 위한 임시 바구니
-    let firstFlushDone = false;
+    let sentenceBuffer = "";
     const prompt = buildPrompt(s);
 
     let inStory = false;
     try {
         await callStoryAIStream(uid, delta => {
-            // 🔥 SSE 로 보내기 전, delta 에서 #숫자 패턴을 모두 제거
-               if (typeof delta === "string") {
-                      delta = delta.replace(/#\d+/g, "");
-                   }
-        full += delta;
-
-        // ★ STORY 태그 진입 전
-        if (!inStory) {
-            const idx = full.indexOf("<STORY>");
-            if (idx !== -1) {
-                inStory = true;
-
-                // ✅ 핵심: 기존 텍스트 절대 사용 금지
-                sentenceBuffer = "";
-                firstFlushDone = false;
+            if (typeof delta === "string") {
+                delta = delta.replace(/#\d+/g, ""); // 스트리밍 출력에서 점수 제거
             }
-            return; // STORY 전에는 아무것도 보내지 않음
-        }
+            full += delta;
 
-        // ★ STORY 내부: 오직 delta만 누적
-        sentenceBuffer += delta;
+            if (!inStory) {
+                const idx = full.indexOf("<STORY>");
+                if (idx !== -1) {
+                    inStory = true;
+                    // ✅ 변경: <STORY> 태그 이후에 포함된 텍스트를 버리지 않고 보존함
+                    sentenceBuffer = full.substring(idx + 7);
+                }
+                return;
+            }
 
-        // ✅ 문장 단위 flush만 허용
+            // STORY 태그 내부라면 텍스트 누적
+            sentenceBuffer += delta;
+
+            // 문장 단위로 클라이언트 전송
             sentenceBuffer = flushSentences(sentenceBuffer, sentence => {
-
-                // 🔥 문장 끝에 붙은 #숫자만 제거
-                sentence = sentence.replace(/\s+#\d+\s*$/g, "");
-
-                res.write(`data: ${sentence}\n\n`);
+                const cleanSentence = sentence.replace(/\s+#\d+\s*$/g, "");
+                res.write(`data: ${cleanSentence}\n\n`);
             });
+        }, prompt);
+    } catch (e) {
+        s.called = false;
+        s.resed = false;
+        s.lastCall = 0;
+        await setSession(uid, s);
+        return res.end(); // 에러 발생 시 종료
+    }
 
-
-
-
-
-        // ❌ UX flush 완전히 제거
-    }, prompt);
-} catch (e) {
-    s.called = false;
-    s.resed = false;
-    s.lastCall = 0;
-    await setSession(uid, s);
-    return res.json({ ok: false, error: "AI_FAILED" });
-}
-
-
-    // AI 스트리밍이 끝난 후 바구니에 남은 찌꺼기(마지막 문장) 처리
+    // 마지막 남은 문장 처리
     if (sentenceBuffer.trim()) {
         const clean = sentenceBuffer.replace(/\s+#\d+\s*$/g, "");
         res.write(`data: ${clean}\n\n`);
     }
 
-
-    // 그 이후에 choices 정보 전송
+    // 선택지 정보 전송 및 세션 저장 (기존 로직 유지)
     const parsed = parseStory(full);
     res.write(`event: choices\ndata: ${JSON.stringify({
         choices: parsed.choices.map(c => c.text)

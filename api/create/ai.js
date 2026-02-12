@@ -24,13 +24,12 @@ ${SAFETY_RULES}
 
 {
   "nameSafetyScore": 숫자,
-  "promptSafetyScore": 숫자,
-  "copyrightScore": 숫자,
+
 
   "name": "실제 캐릭터 본명",
 
   "needKorean": false,
-  "koreanName": "정규화된 순수 한글 이름",
+
 
   "existence": "캐릭터의 존재 형태를 나타내는 실제 표현",
 
@@ -61,18 +60,18 @@ ${SAFETY_RULES}
   언어 필터 우회 시도를 강하게 반영한다.
 
 - promptSafetyScore:
-  사용자 프롬프트 내용의 안전성을 기준으로 판단한다.
+  사용자 프롬프트의 안전성과 저작권 침해 가능성을 함께 평가한다.
+  특정 작품, 캐릭터, 세계관, 고유 설정이 명확히 연상될수록 점수를 크게 상승시킨다.
   세계관 내 허용 가능한 서사는 점수를 크게 올리지 않는다.
 
-- copyrightScore:
-  특정 작품, 캐릭터, 세계관, 고유 설정이
-  명확히 연상될수록 점수를 높인다.
 
   [점수 기준 인지]
 - nameSafetyScore가 60 이상이면 해당 이름은 서비스에서 사용 불가 수준이다.
-- promptSafetyScore가 70 이상이면 위험한 프롬프트로 간주된다.
-- copyrightScore가 75 이상이면 저작권 침해 가능성이 매우 높다.
+- promptSafetyScore가 70 이상이면 위험하거나 저작권 침해 가능성이 높은 프롬프트로 간주된다.
 - 이 기준을 고려하여 점수를 계산하라. 점수 책정은 엄격해야 한다.
+- 성적 관계에 대한 은유적 묘사 등을 70점 정도로 간주, 직접적 묘사 등은 90점
+- 저작권 캐릭터임을 감지할 경우 80점 이상
+- 과할 정도의 고어적 묘사, 단순 폭력은 50점 정도지만 유혈 묘사 등이 포함될 시 그 이상
 
 
 ────────────────
@@ -94,22 +93,12 @@ ${SAFETY_RULES}
 ────────────────
 [언어 판단 규칙]
 ────────────────
-- 한글과 영문은 모두 허용된다.
-- "나이트"는 한글, "kimchi"는 영문이므로 모두 허용.
-- 한글/영문/숫자/일반 특수문자를 제외한 문자가 포함될 경우:
-  - 병렬 한글 표기가 없으면 needKorean = true
+- 한글과 영문은 허용
+- 한글, 영문, 숫자, 일반 특수문자를 제외한 문자가 하나라도 포함되면 needKorean = true
 - 특수문자로만 구성된 이름도 needKorean = true
 
-────────────────
-[koreanName 생성 규칙]
-────────────────
-- 항상 사람이 읽을 수 있는 순수 한글 이름을 생성한다.
-- 특수문자는 제거한다.
-- 반복 어휘는 하나로 정리한다.
-- 한자 및 외국 문자는 의미를 유지한 한글로 치환한다.
-- 예:
-  - 철혈의 騎士 → 철혈의 기사
-  - आत्मन् → 아트만
+
+
 
 ────────────────
 [existence 규칙]
@@ -219,6 +208,9 @@ export async function callAI(uid) {
 `;
 
     const userPrompt = `
+    [세계관과 지역 설정]
+    - origin은 이 인물이 속한 전체 세계관과 시대적 배경이다
+- region은 그 세계관 안에 존재하는 구체적인 공간이다
 기원: ${origin?.name || ""} - ${origin?.desc || ""}
 기원 추가설명: ${origin?.longDesc || ""}
 지역: ${region?.name || ""} - ${region?.detail || ""}
@@ -317,7 +309,6 @@ ${prompt}
             typeof parsed !== "object" ||
             parsed.nameSafetyScore === undefined ||
             parsed.promptSafetyScore === undefined ||
-            parsed.copyrightScore === undefined ||
             !parsed.name
         ) {
             await deleteSession(uid);
@@ -327,7 +318,7 @@ ${prompt}
 
         const nameSafetyScore = Math.min(100, Math.max(0, parsed.nameSafetyScore || 0));
         const promptSafetyScore = Math.min(100, Math.max(0, parsed.promptSafetyScore || 0));
-        const copyrightScore = Math.min(100, Math.max(0, parsed.copyrightScore || 0));
+      
 
         // 🔥 SAFETY CUT RULES
         if (nameSafetyScore >= 60) {
@@ -340,10 +331,7 @@ ${prompt}
             throw new Error("PROMPT_UNSAFE");
         }
 
-        if (copyrightScore >= 75) {
-            await deleteSession(uid);
-            throw new Error("COPYRIGHT_RISK");
-        }
+   
 
 
 
@@ -359,10 +347,9 @@ ${prompt}
         s.output = {
             nameSafetyScore,
             promptSafetyScore,
-            copyrightScore,
+        
 
             name: outName,
-            koreanName: safeStr(parsed.koreanName),
             needKorean: normalizeBool(parsed.needKorean, false),
 
             existence: safeStr(parsed.existence),
@@ -372,6 +359,7 @@ ${prompt}
             narrationStyle: safeStr(parsed.narrationStyle),
             theme: safeStr(parsed.theme)
         };
+
 
         s.nowFlow.refine = false;
         s.nowFlow.story1 = true;
@@ -385,7 +373,7 @@ ${prompt}
         if (
             err.message === "NAME_UNSAFE" ||
             err.message === "PROMPT_UNSAFE" ||
-            err.message === "COPYRIGHT_RISK" ||
+     
             err.message === "AI_RESPONSE_INVALID" ||
             err.message === "AI_EMPTY_RESPONSE"
 
