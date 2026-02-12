@@ -173,12 +173,14 @@ async function stream(uid, s, res) {
         sentenceBuffer += delta;
 
         // ✅ 문장 단위 flush만 허용
-        sentenceBuffer = flushSentences(sentenceBuffer, sentence => {
-            // 🔥 선택지 후보는 스트리밍 금지
-            if (sentence.includes("#")) return;
+            sentenceBuffer = flushSentences(sentenceBuffer, sentence => {
 
-            res.write(`data: ${sentence}\n\n`);
-        });
+                // 🔥 문장 끝에 붙은 #숫자만 제거
+                sentence = sentence.replace(/\s+#\d+\s*$/g, "");
+
+                res.write(`data: ${sentence}\n\n`);
+            });
+
 
 
 
@@ -196,8 +198,10 @@ async function stream(uid, s, res) {
 
     // AI 스트리밍이 끝난 후 바구니에 남은 찌꺼기(마지막 문장) 처리
     if (sentenceBuffer.trim()) {
-        res.write(`data: ${sentenceBuffer}\n\n`);
+        const clean = sentenceBuffer.replace(/\s+#\d+\s*$/g, "");
+        res.write(`data: ${clean}\n\n`);
     }
+
 
     // 그 이후에 choices 정보 전송
     const parsed = parseStory(full);
