@@ -127,51 +127,74 @@ ${SAFETY_RULES}
  * - 여기서는 delta만 콜백 전달
  */
 export async function callStoryAIStream(uid, onDelta, prompt) {
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`
-        },
-        body: JSON.stringify({
-            model: "gpt-4o-mini",
-            stream: true,
-            messages: [
-                { role: "system", content: SYSTEM_FOR_STORY },
-                { role: "user", content: prompt }
-            ]
-        })
-    });
+    const MODEL_ID = "gemini-2.5-flash-lite";
+    const API_VERSION = "v1beta";
+
+    const res = await fetch(
+        `https://generativelanguage.googleapis.com/${API_VERSION}/models/${MODEL_ID}:streamGenerateContent`,
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "x-goog-api-key": process.env.GEMINI_API_KEY
+            },
+            body: JSON.stringify({
+                systemInstruction: {
+                    parts: [{ text: SYSTEM_FOR_STORY }]
+                },
+                contents: [
+                    {
+                        role: "user",
+                        parts: [{ text: prompt }]
+                    }
+                ],
+                generationConfig: {
+                    temperature: 0.7,
+                    topP: 0.9,
+                    maxOutputTokens: 2048
+                }
+            })
+        }
+    );
 
     if (!res.ok) {
-        onDelta(""); // noop
-        throw new Error("AI_REQUEST_FAILED");
+        throw new Error("GEMINI_REQUEST_FAILED");
     }
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
 
+    let buffer = "";
+
     while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = decoder.decode(value);
-        const lines = chunk.split("\n");
+        buffer += decoder.decode(value, { stream: true });
+
+        // Gemini 스트리밍은 줄 단위 JSON 객체로 내려옴
+        const lines = buffer.split("\n");
 
         for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-
-            const payload = line.replace("data: ", "");
-
-            if (payload === "[DONE]") continue;
+            const trimmed = line.trim();
+            if (!trimmed) continue;
 
             try {
-                const json = JSON.parse(payload);
-                const delta = json.choices?.[0]?.delta?.content;
-                if (delta) onDelta(delta);
-            } catch (_) {
-                // ignore stream control frames
+                const json = JSON.parse(trimmed);
+
+                const parts =
+                    json.candidates?.[0]?.content?.parts || [];
+
+                for (const part of parts) {
+                    if (part.text) {
+                        onDelta(part.text);
+                    }
+                }
+            } catch {
+                // JSON이 아직 완성되지 않은 경우 무시
             }
         }
+
+        buffer = "";
     }
 }
