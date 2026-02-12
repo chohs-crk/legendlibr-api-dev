@@ -397,7 +397,7 @@ traits 규칙:
         } catch (err) {
             console.error("REGION_UPDATE_FAIL:", err);
         }
-
+        await deleteSession(uid);
         return res.json({
             ok: true,
             id: ref.id,
