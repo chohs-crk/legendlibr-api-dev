@@ -7,7 +7,8 @@
 import { withApi } from "../_utils/withApi.js";
 import { db } from "../../firebaseAdmin.js";
 import { ORIGINS } from "../base/data/origins.js";
-import { getSession, setSession } from "../base/sessionstore.js";
+import { getSession, setSession, deleteSession } from "../base/sessionstore.js";
+
 import { callAI } from "./ai.js";
 
 
@@ -21,12 +22,23 @@ export default withApi("expensive", async (req, res, { uid }) => {
 
     // === 0. 기존 세션 존재 여부 확인 ===
     const existing = await getSession(uid);
+
     if (existing) {
-        return res.status(409).json({
-            ok: false,
-            error: "SESSION_ALREADY_EXISTS"
-        });
+        const isFinal =
+            existing.nowFlow?.final === true;
+
+        // 🔒 final 단계면 거부
+        if (isFinal) {
+            return res.status(409).json({
+                ok: false,
+                error: "FINAL_IN_PROGRESS"
+            });
+        }
+
+        // 🔓 final이 아니면 기존 세션 강제 삭제 후 새로 생성 허용
+        await deleteSession(uid);
     }
+
     // ===============================
     // 🔒 charCount 제한 (10)
     // ===============================

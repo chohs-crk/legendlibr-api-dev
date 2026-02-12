@@ -172,18 +172,18 @@ export async function callStoryAIStream(uid, onDelta, prompt) {
 
         buffer += decoder.decode(value, { stream: true });
 
-        // 줄 단위 분리
-        const lines = buffer.split("\n");
+        // JSON 객체 단위로 추출
+        let start;
+        let end;
 
-        // 마지막 줄은 완전하지 않을 수 있으므로 남겨둔다
-        buffer = lines.pop();
-
-        for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
+        while (
+            (start = buffer.indexOf("{")) !== -1 &&
+            (end = buffer.indexOf("}", start)) !== -1
+        ) {
+            const candidate = buffer.slice(start, end + 1);
 
             try {
-                const json = JSON.parse(trimmed);
+                const json = JSON.parse(candidate);
 
                 const parts =
                     json.candidates?.[0]?.content?.parts || [];
@@ -193,11 +193,14 @@ export async function callStoryAIStream(uid, onDelta, prompt) {
                         onDelta(part.text);
                     }
                 }
-            } catch (err) {
-                // 파싱 실패 시 로그만 남기고 계속
-                console.warn("[STREAM_PARSE_FAIL]", trimmed);
+
+                buffer = buffer.slice(end + 1);
+            } catch {
+                // 아직 완전한 JSON이 아님
+                break;
             }
         }
     }
+
 
 }
