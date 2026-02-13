@@ -24,7 +24,7 @@ ${SAFETY_RULES}
 
 {
   "nameSafetyScore": 숫자,
-
+  "promptSafetyScore": 숫자,
 
   "name": "실제 캐릭터 본명",
 

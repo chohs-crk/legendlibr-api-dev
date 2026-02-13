@@ -9,7 +9,7 @@ export default withApi("protected", async (req, res, { uid }) => {
 
     let flow = null;
     if (s.nowFlow.story1) flow = "story1";
-    else if (s.nowFlow.story2) flow = "story2";
+   
     else if (s.nowFlow.story3) flow = "story3";
     else if (s.nowFlow.final) flow = "final";
 

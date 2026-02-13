@@ -19,51 +19,96 @@ import {
 /* =========================
    HANDLER
 ========================= */
-async function callGeminiJSON(systemText, userText, temperature = 0.4) {
+async function callGeminiJSON(systemText, userText, temperature = 0.3) {
     const MODEL_ID = "gemini-2.5-flash-lite";
     const API_VERSION = "v1beta";
 
-    const res = await fetch(
-        `https://generativelanguage.googleapis.com/${API_VERSION}/models/${MODEL_ID}:generateContent`,
-        {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "x-goog-api-key": process.env.GEMINI_API_KEY
-            },
-            body: JSON.stringify({
-                systemInstruction: {
-                    parts: [{ text: systemText }]
-                },
-                contents: [
-                    {
-                        role: "user",
-                        parts: [{ text: userText }]
-                    }
-                ],
-                generationConfig: {
-                    temperature,
-                    topP: 0.9,
-                    maxOutputTokens: 2048
+    const MAX_RETRY = 3;
+    let attempt = 0;
+
+    while (attempt < MAX_RETRY) {
+        try {
+            const res = await fetch(
+                `https://generativelanguage.googleapis.com/${API_VERSION}/models/${MODEL_ID}:generateContent`,
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "x-goog-api-key": process.env.GEMINI_API_KEY
+                    },
+                    body: JSON.stringify({
+                        systemInstruction: {
+                            parts: [{ text: systemText }]
+                        },
+                        contents: [
+                            {
+                                role: "user",
+                                parts: [{ text: userText }]
+                            }
+                        ],
+                        generationConfig: {
+                            temperature,
+                            topP: 0.9,
+                            maxOutputTokens: 2048
+                        }
+                    })
                 }
-            })
+            );
+
+            if (!res.ok) {
+                const errText = await res.text();
+                console.error("GEMINI ERROR STATUS:", res.status);
+                console.error("GEMINI ERROR BODY:", errText);
+
+                // 503만 재시도
+                if (res.status === 503) {
+                    attempt++;
+                    const delay = 500 * Math.pow(2, attempt); // 500ms, 1000ms, 2000ms...
+                    await new Promise(r => setTimeout(r, delay));
+                    continue;
+                }
+
+                throw new Error("GEMINI_REQUEST_FAILED");
+            }
+
+            const data = await res.json();
+
+            if (!data.candidates || !data.candidates.length) {
+                throw new Error("GEMINI_EMPTY_RESPONSE");
+            }
+
+            const text =
+                data.candidates?.[0]?.content?.parts
+                    ?.map(p => p.text || "")
+                    .join("") || "{}";
+
+            return text.replace(/```json|```/g, "").trim();
+
+        } catch (err) {
+
+            // 우리가 직접 throw한 에러는 재시도하지 않음
+            if (
+                err.message === "GEMINI_REQUEST_FAILED" ||
+                err.message === "GEMINI_EMPTY_RESPONSE"
+            ) {
+                throw err;
+            }
+
+            attempt++;
+
+            if (attempt >= MAX_RETRY) {
+                throw new Error("GEMINI_RETRY_EXCEEDED");
+            }
+
+            const delay = 500 * Math.pow(2, attempt);
+            await new Promise(r => setTimeout(r, delay));
         }
-    );
 
-    if (!res.ok) throw new Error("GEMINI_REQUEST_FAILED");
-
-    const data = await res.json();
-    // 🔒 Gemini 빈 응답 보호
-    if (!data.candidates || !data.candidates.length) {
-        throw new Error("GEMINI_EMPTY_RESPONSE");
     }
-    const text =
-        data.candidates?.[0]?.content?.parts
-            ?.map(p => p.text || "")
-            .join("") || "{}";
 
-    return text.replace(/```json|```/g, "").trim();
+    throw new Error("GEMINI_RETRY_EXCEEDED");
 }
+
 
 export default withApi("expensive", async (req, res, { uid }) => {
     let s;
@@ -75,6 +120,13 @@ export default withApi("expensive", async (req, res, { uid }) => {
 
         s = await getSession(uid);
         if (!s || !s.nowFlow?.final) {
+            console.log("[FINAL][START]", {
+                uid,
+                hasSession: !!s,
+                nowFlow: s?.nowFlow,
+                selected: s?.selected
+            });
+
             return res.status(400).json({ ok: false, error: "INVALID_FLOW" });
         }
 
@@ -114,24 +166,29 @@ export default withApi("expensive", async (req, res, { uid }) => {
 
         const storyScore =
             getScore("story1") +
-            getScore("story2") +
             getScore("story3");
 
+
         const endingType =
-            storyScore >= 3 && storyScore <= 5
+            storyScore >= 2 && storyScore <= 3
                 ? "비극적인 방향의 결말 스토리 작성"
                 : "사건을 성공적으로 해결하는 방향의 결말 스토리 작성";
 
         /* ------------------------
            AI CALL #1 : ENDING + FEATURES
         ------------------------- */
+       
+
         const prompt1 = buildFinalEndingPrompt({
             input,
             output,
             selected: s.selected,
             endingType
         });
-
+        console.log("[FINAL][PROMPT1_LENGTH]", {
+            length: prompt1.length
+        });
+       
 
         const raw1 = await callGeminiJSON(
             SYSTEM_FOR_FINAL,
@@ -139,7 +196,7 @@ export default withApi("expensive", async (req, res, { uid }) => {
             0.4
         );
 
-
+        console.log("[FINAL][RAW1]", raw1);
        
        
 
@@ -163,10 +220,10 @@ export default withApi("expensive", async (req, res, { uid }) => {
         ------------------------- */
         const fullStory = [
             output.story1?.story || "",
-            output.story2?.story || "",
             output.story3?.story || "",
             ending
         ]
+
             .join(" ")
             .replace(/\s+/g, " ")
             .trim();
@@ -236,9 +293,20 @@ export default withApi("expensive", async (req, res, { uid }) => {
                 throw "INVALID_SCORES";
             }
 
-            if (!Array.isArray(result.skills) || result.skills.length !== 4) {
-                throw "INVALID_SKILLS_COUNT";
+            if (Array.isArray(result2.skills) && result2.skills.length < 4) {
+                while (result2.skills.length < 4) {
+                    result2.skills.push({
+                        name: "잃어버린 힘",
+                        power: 1,
+                        turns: 1,
+                        weights: [5],
+                        impact: "A",
+                        shortDesc: "숨겨진 가능성",
+                        longDesc: "아직 완전히 발현되지 않은 힘이다.(생성 오류로 누락, 생성 재시도 권장)"
+                    });
+                }
             }
+
 
             for (const s of result.skills) {
                 if (
@@ -282,6 +350,7 @@ export default withApi("expensive", async (req, res, { uid }) => {
             output,
             fullStory
         });
+     
 
         const raw2 = await callGeminiJSON(
             `
@@ -329,7 +398,7 @@ traits 규칙:
             0.4
         );
 
-
+        console.log("[FINAL][RAW2]", raw2);
         
  
 
@@ -349,6 +418,11 @@ traits 규칙:
            FIRESTORE SAVE
         ------------------------- */
         const ref = db.collection("characters").doc();
+        console.log("[FINAL][SAVE_DATA]", {
+            name: output.name,
+            featuresLength: features.length,
+            skillsCount: result2.skills?.length
+        });
 
         await ref.set({
             uid,
@@ -456,7 +530,11 @@ traits 규칙:
         } catch (err) {
             console.error("REGION_UPDATE_FAIL:", err);
         }
-       
+        try {
+            await deleteSession(uid);
+        } catch (e) {
+            console.error("SESSION_DELETE_FAIL:", e);
+        }
         return res.json({
             ok: true,
             id: ref.id,
@@ -464,14 +542,15 @@ traits 규칙:
         });
 
     } catch (err) {
+        try {
+            await deleteSession(uid);
+        } catch (e) {
+            console.error("SESSION_DELETE_FAIL:", e);
+        }
         console.error("FINAL ERROR:", err);
         return res.status(500).json({
             ok: false,
             error: "FINAL_FAILED"
         });
-    } finally {
-       
-            await deleteSession(uid);
-        
     }
 });

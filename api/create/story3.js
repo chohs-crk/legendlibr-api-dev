@@ -54,11 +54,12 @@ function buildPrompt(s) {
     } = s.output;
 
     const p1 = s.output.story1?.story || "";
-    const p2 = s.output.story2?.story || "";
 
     const origin = s.input.origin;
     const region = s.input.region;
-
+    const selectedIndex1 = s.selected?.story1;
+    const selectedChoice1 =
+        s.output.story1?.choices?.[selectedIndex1]?.text || "";
     return `
 [이야기 전제]
 이 장면은 이야기의 전환점이다.
@@ -73,10 +74,35 @@ function buildPrompt(s) {
  - 문장 부호가 포함되어야 한다.
  - 직전 문장 다음에 올 소설 문장처럼 생각하라
 
+
+[이전 서사 처리 규칙 - 매우 중요]
+
+- 이전 서사는 절대 요약하지 않는다
+- 이전 내용을 다시 설명하지 않는다
+- 같은 장면을 다시 묘사하지 않는다
+- 같은 장소, 같은 행동을 다시 시작하지 않는다
+
+
+- 반드시 이전 이야기의 "마지막 문장 직후 1~3초 후 시점"에서 시작한다
+- 이전 사건은 배경으로만 존재하며 직접 언급하지 않는다
+- 이미 벌어진 일은 암묵적으로 전제하고, 새로운 정보나 변화만 서술한다
+- 이전 장면의 분위기는 유지하되 문장은 완전히 새로 써야 한다
+
+이야기는 항상 전진해야 한다.
+절대 되돌아가지 않는다.
+
 [이전 서사]
 ${p1}
 
-${p2}
+[직전의 장면에서 발생한 행동]
+
+${selectedChoice1}
+
+※ 위 행동들은 이미 실제로 실행되었다.
+※ 그 결과 직후부터 서술을 시작한다.
+※ 선택지라는 개념은 절대 언급하지 않는다.
+
+
 
 [캐릭터 고정 정보]
 이름: ${name}

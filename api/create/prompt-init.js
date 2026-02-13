@@ -133,7 +133,7 @@ export default withApi("expensive", async (req, res, { uid }) => {
         nowFlow: {
             refine: true,
             story1: false,
-            story2: false,
+          
             story3: false,
             final: false
         },
