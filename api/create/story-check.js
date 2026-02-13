@@ -18,6 +18,15 @@ export default withApi("protected", async (req, res, { uid }) => {
         !s.called &&
         !s.resed;
 
+    const remain =
+        s.called && !s.resed
+            ? Math.max(0, 30000 - (Date.now() - s.lastCall))
+            : 0;
+
+    const canRecreateFinal =
+        flow === "final" &&
+        remain === 0;
+
     return res.json({
         ok: true,
         flow,
@@ -26,9 +35,9 @@ export default withApi("protected", async (req, res, { uid }) => {
         intro: s.output?.intro || "",
         rawName: s.input.name,
         isFinalFF,
-        remain: s.called && !s.resed
-            ? Math.max(0, 30000 - (Date.now() - s.lastCall))
-            : 0
+        remain,
+        canRecreateFinal
     });
+
 
 });

@@ -232,7 +232,8 @@ export default withApi("expensive", async (req, res, { uid }) => {
         s.selected = s.selected || {};
         s.selected.story1 = req.body.index;
         s.nowFlow.story1 = false;
-        s.nowFlow.story2 = true;
+        s.nowFlow.story3 = true;
+
 
         // ★ FF로 초기화 + lastCall 반드시 0
         s.called = false;
