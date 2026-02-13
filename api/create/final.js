@@ -236,34 +236,38 @@ export default withApi("expensive", async (req, res, { uid }) => {
             for (let i = 0; i < text.length; i++) {
                 const ch = text[i];
 
-                // 대사 시작/끝
                 if (ch === "§") {
-                    inDialogue = !inDialogue;
-                    sentenceCount = 0;
-                    result += "\n\n" + ch;
+                    if (!inDialogue) {
+                        result += "\n\n§";
+                        inDialogue = true;
+                    } else {
+                        result += "§\n\n";
+                        inDialogue = false;
+                    }
                     continue;
                 }
 
                 result += ch;
 
-                // 마침표 하나일 경우만 카운트
-                if (
-                    ch === "." &&
+                if (!inDialogue && ch === "." &&
                     text[i + 1] !== "." &&
-                    text[i - 1] !== "."
-                ) {
-                    sentenceCount++;
-                }
+                    text[i - 1] !== ".") {
 
-                // 세 문장마다 줄바꿈
-                if (!inDialogue && sentenceCount === 3) {
+                    sentenceCount++;
+
+                    // 1문장마다 1줄
                     result += "\n";
-                    sentenceCount = 0;
+
+                    // 3문장마다 추가 1줄
+                    if (sentenceCount % 3 === 0) {
+                        result += "\n";
+                    }
                 }
             }
 
             return result.trim();
         }
+
 
 
         function assertValidEnding(result) {
@@ -439,10 +443,10 @@ traits 규칙:
                🔍 SAFETY SCORES
             ===================== */
             safety: {
-                nameSafetyScore: output.nameSafetyScore ?? 0,
-                promptSafetyScore: output.promptSafetyScore ?? 0,
-           
+                nameSafetyScore: s.metaSafety?.nameSafetyScore ?? output.nameSafetyScore ?? 0,
+                promptSafetyScore: s.metaSafety?.promptSafetyScore ?? output.promptSafetyScore ?? 0,
             },
+
 
             /* =====================
                🧠 PROMPT
@@ -453,10 +457,11 @@ traits 규칙:
             /* =====================
                📖 CHARACTER META
             ===================== */
-            existence: output.existence,
-            canSpeak: !!output.canSpeak,
-            narrationStyle: output.narrationStyle,
-            speechStyle: output.speechStyle,
+            existence: output.existence || "",
+            canSpeak: !!output.canSpeak || "",
+            narrationStyle: output.narrationStyle || "",
+            speechStyle: output.speechStyle || "",
+            profile: output.profile || "",
 
             originId: input.origin?.id,
             origin: input.origin?.name,

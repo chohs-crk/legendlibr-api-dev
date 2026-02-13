@@ -9,7 +9,8 @@ import { db } from "../../firebaseAdmin.js";
 import { ORIGINS } from "../base/data/origins.js";
 import { getSession, setSession, deleteSession } from "../base/sessionstore.js";
 
-import { callAI } from "./ai.js";
+import { callAI } from "./promptinit-ai.js";
+
 
 
 
