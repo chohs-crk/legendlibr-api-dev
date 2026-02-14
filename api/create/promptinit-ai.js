@@ -69,7 +69,7 @@ export async function callAI(uid) {
 
 ${originGuide}
 
-[유저 입력 원본 – 수정 금지]
+[유저 입력 원본]
 이름 원문: ${name}
 
 사용자 프롬프트:
@@ -173,12 +173,12 @@ ${prompt}
       
 
         // 🔥 SAFETY CUT RULES
-        if (nameSafetyScore >= 60) {
+        if (nameSafetyScore >= 75) {
             await deleteSession(uid);
             throw new Error("NAME_UNSAFE");
         }
 
-        if (promptSafetyScore >= 70) {
+        if (promptSafetyScore >= 85) {
             await deleteSession(uid);
             throw new Error("PROMPT_UNSAFE");
         }

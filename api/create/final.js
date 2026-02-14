@@ -285,66 +285,138 @@ export default withApi("expensive", async (req, res, { uid }) => {
         }
 
         function assertValidStats(result) {
+
             if (!result || typeof result !== "object") {
-                throw "INVALID_STATS_OBJECT";
+                result = {};
             }
 
+            /* =========================
+               TRAITS 안전 보정
+            ========================= */
             if (!result.traits || typeof result.traits !== "object") {
-                throw "INVALID_TRAITS";
+                result.traits = {};
             }
 
+            result.traits.physical = clampInt(result.traits.physical, 1, 10, 5);
+            result.traits.intellectual = clampInt(result.traits.intellectual, 1, 10, 5);
+
+            if (!["선", "중립", "악"].includes(result.traits.alignment)) {
+                result.traits.alignment = "중립";
+            }
+
+            if (typeof result.traits.growth !== "string") {
+                result.traits.growth = "성장 가능성이 남아 있다.";
+            }
+
+            /* =========================
+               SCORES 안전 보정
+            ========================= */
             if (!result.scores || typeof result.scores !== "object") {
-                throw "INVALID_SCORES";
+                result.scores = {};
             }
 
-            if (Array.isArray(result2.skills) && result2.skills.length < 4) {
-                while (result2.skills.length < 4) {
-                    result2.skills.push({
-                        name: "잃어버린 힘",
-                        power: 1,
-                        turns: 1,
-                        weights: [5],
-                        impact: "A",
-                        shortDesc: "숨겨진 가능성",
-                        longDesc: "아직 완전히 발현되지 않은 힘이다.(생성 오류로 누락, 생성 재시도 권장)"
-                    });
-                }
+            const scoreKeys = [
+                "combatScore",
+                "supportScore",
+                "worldScore",
+                "narrativeScore",
+                "charmScore",
+                "dominateScore",
+                "metaScore",
+                "ruleBreakScore",
+                "willscore"
+            ];
+
+            for (const key of scoreKeys) {
+                result.scores[key] = clampInt(result.scores[key], 1, 10, 5);
             }
 
+            /* =========================
+               SKILLS 안전 보정
+            ========================= */
 
-            for (const s of result.skills) {
-                if (
-                    !s ||
-                    typeof s !== "object" ||
-                    typeof s.name !== "string" ||
-                    typeof s.shortDesc !== "string" ||
-                    typeof s.longDesc !== "string" ||
-                    !Number.isInteger(s.power)
-                ) {
-                    throw "INVALID_SKILL_FORMAT";
-                }
-
-                if (
-                    !Number.isInteger(s.turns) ||
-                    s.turns < 1 ||
-                    s.turns > 3
-                ) {
-                    throw "INVALID_SKILL_TURNS";
-                }
-
-                if (
-                    !Array.isArray(s.weights) ||
-                    s.weights.length !== s.turns ||
-                    !s.weights.every(w => Number.isInteger(w) && w >= 1 && w <= 10)
-                ) {
-                    throw "INVALID_SKILL_WEIGHTS";
-                }
-
-                if (s.impact !== "A" && s.impact !== "B") {
-                    throw "INVALID_SKILL_IMPACT";
-                }
+            if (!Array.isArray(result.skills)) {
+                result.skills = [];
             }
+
+            // 4개 미만이면 기본 스킬 추가
+            while (result.skills.length < 4) {
+                result.skills.push(makeDefaultSkill());
+            }
+
+            // 4개 초과면 자름
+            result.skills = result.skills.slice(0, 4);
+
+            result.skills = result.skills.map(skill => {
+
+                if (!skill || typeof skill !== "object") {
+                    skill = makeDefaultSkill();
+                }
+
+                skill.name = typeof skill.name === "string" && skill.name.trim()
+                    ? skill.name
+                    : "잃어버린 힘";
+
+                skill.shortDesc = typeof skill.shortDesc === "string"
+                    ? skill.shortDesc
+                    : "설명이 누락된 기술";
+
+                skill.longDesc = typeof skill.longDesc === "string"
+                    ? skill.longDesc
+                    : "생성 오류로 누락된 기술이다.";
+
+                skill.power = clampInt(skill.power, 1, 10, 5);
+
+                skill.turns = clampInt(skill.turns, 1, 3, 1);
+
+                if (!Array.isArray(skill.weights)) {
+                    skill.weights = [];
+                }
+
+                // turns 길이에 맞게 조정
+                while (skill.weights.length < skill.turns) {
+                    skill.weights.push(5);
+                }
+
+                skill.weights = skill.weights
+                    .slice(0, skill.turns)
+                    .map(w => clampInt(w, 1, 10, 5));
+
+                if (skill.impact !== "A" && skill.impact !== "B") {
+                    skill.impact = "A";
+                }
+
+                return skill;
+            });
+
+            return result;
         }
+
+
+        /* =========================
+           유틸 함수
+        ========================= */
+
+        function clampInt(value, min, max, fallback) {
+            const n = parseInt(value);
+            if (!Number.isInteger(n)) return fallback;
+            if (n < min) return min;
+            if (n > max) return max;
+            return n;
+        }
+
+        function makeDefaultSkill() {
+            return {
+                name: "잃어버린 힘",
+                power: 5,
+                turns: 1,
+                weights: [5],
+                impact: "A",
+                shortDesc: "숨겨진 가능성",
+                longDesc: "아직 완전히 발현되지 않은 힘이다."
+            };
+        }
+
 
         /* ------------------------
            AI CALL #2 : TRAITS + SCORES + SKILLS

@@ -2,10 +2,7 @@ import { SAFETY_RULES_AFTER } from "../base/safetyrules.js";
 
 
 
-/* =========================
-   SYSTEM PROMPT
-========================= */
-import { SAFETY_RULES_AFTER } from "../base/safetyrules.js";
+
 
 /* =========================
    SYSTEM PROMPT
@@ -42,8 +39,11 @@ ${SAFETY_RULES_AFTER}
 
 [Ãâ·Â ½ºÅ°¸¶]
 {
-  "ending": "°á¸» 4~6¹®Àå",
-  "features": ["Æ¯Â¡1","Æ¯Â¡2","Æ¯Â¡3","Æ¯Â¡4","Æ¯Â¡5"]
+ 
+  "ending": "<°á¸» ÅØ½ºÆ®>",
+  "features": ["<Æ¯Â¡1>", "<Æ¯Â¡2>", "<Æ¯Â¡3>", "<Æ¯Â¡4>", "<Æ¯Â¡5>"]
+
+
 }
 `;
 
