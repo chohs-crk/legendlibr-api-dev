@@ -139,28 +139,12 @@ export default withApi("protected", async (req, res, { uid }) => {
                 return res.status(403).json({ error: "본인 캐릭터 아님" });
             }
 
-            // =====================================================
-            // 🔵 트랜잭션 밖에서 next owner 후보 미리 조회
-            // =====================================================
-            let nextOwnerChar = null;
-
-            if (data.regionId && !data.regionId.endsWith("_DEFAULT")) {
-                const q = await db.collection("characters")
-                    .where("regionId", "==", data.regionId)
-                    .orderBy("rankScore", "desc")
-                    .get();
-
-                nextOwnerChar = q.docs
-                    .map(d => ({ id: d.id, ...d.data() }))
-                    .find(c => c.id !== id) || null;
-            }
-
-            // =====================================================
-            // 🔒 트랜잭션 시작
-            // =====================================================
             await db.runTransaction(async (tx) => {
 
-                // ---------- READ (모두 먼저) ----------
+                // ======================
+                // 🔵 1. 모든 READ 먼저
+                // ======================
+
                 const charSnap = await tx.get(ref);
                 if (!charSnap.exists) throw "NO_CHAR";
 
@@ -174,15 +158,27 @@ export default withApi("protected", async (req, res, { uid }) => {
 
                 let regionRef = null;
                 let regionSnap = null;
+                let rankQuerySnap = null;
 
                 if (regionId && !regionId.endsWith("_DEFAULT")) {
+
                     regionRef = db.collection("regionsUsers").doc(regionId);
                     regionSnap = await tx.get(regionRef);
+
+                    if (regionSnap.exists) {
+                        rankQuerySnap = await tx.get(
+                            db.collection("characters")
+                                .where("regionId", "==", regionId)
+                                .orderBy("rankScore", "desc")
+                        );
+                    }
                 }
 
-                // ---------- WRITE (이제부터 write만) ----------
+                // ======================
+                // 🔴 2. 이제 WRITE 시작
+                // ======================
 
-                // 👤 charCount 감소
+                // 👤 사용자 charCount 감소
                 if (currentCount > 0) {
                     tx.set(
                         userRef,
@@ -191,33 +187,42 @@ export default withApi("protected", async (req, res, { uid }) => {
                     );
                 }
 
-                // region 처리
                 if (regionRef && regionSnap?.exists) {
-                    const region = regionSnap.data();
-                    const isOwnerChar = region.ownerchar?.id === id;
 
-                    let update = {
-                        charnum: Math.max((region.charnum || 1) - 1, 0)
+                    const region = regionSnap.data();
+                    const isOwnerChar = region.ownerchar?.id === ref.id;
+
+                    const newCharNum = Math.max((region.charnum || 1) - 1, 0);
+
+                    let updateData = {
+                        charnum: newCharNum
                     };
 
-                    if (isOwnerChar) {
-                        if (nextOwnerChar) {
-                            update.owner = nextOwnerChar.uid;
-                            update.ownerchar = {
-                                id: nextOwnerChar.id,
-                                name: nextOwnerChar.name
+                    if (isOwnerChar && rankQuerySnap) {
+
+                        const next = rankQuerySnap.docs
+                            .map(d => ({ id: d.id, ...d.data() }))
+                            .find(c => c.id !== ref.id);
+
+                        if (next) {
+                            updateData.ownerchar = {
+                                id: next.id,
+                                name: next.name
                             };
+
+                            updateData.owner = next.uid;
                         } else {
-                            update.ownerchar = null;
+                            updateData.ownerchar = null;
                         }
                     }
 
-                    tx.update(regionRef, update);
+                    tx.update(regionRef, updateData);
                 }
 
-                // 마지막에 캐릭터 삭제
                 tx.delete(ref);
             });
+
+
 
             return res.status(200).json({ ok: true });
         }

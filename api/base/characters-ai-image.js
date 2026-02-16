@@ -177,7 +177,8 @@ export default withApi("expensive", async (req, res, { uid }) => {
         });
     }
 
-    await applyUserMetaDelta(uid, { frameDelta: -10 });
+    const userMeta = await applyUserMetaDelta(uid, { frameDelta: -10 });
+
 
     let background = result.backgroundPrompt;
     if (data.regionId?.endsWith("_DEFAULT")) {
@@ -233,5 +234,10 @@ ${STYLE_PROMPTS[style] || ""}
         })
     });
 
-    res.json({ ok: true, imageUrl: url });
+    res.json({
+        ok: true,
+        imageUrl: url,
+        userMeta   // 🔥 추가
+    });
+
 });

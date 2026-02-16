@@ -135,6 +135,21 @@ export default withApi("expensive", async (req, res, { uid }) => {
         /* =========================
         🔒 FINAL 원샷 처리
      ========================= */
+        /* =========================
+      🔒 CHAR LIMIT PRE-CHECK
+   ========================= */
+        const userRef = db.collection("users").doc(uid);
+        const userSnap = await userRef.get();
+        const currentCount = userSnap.exists ? userSnap.data().charCount || 0 : 0;
+
+        if (currentCount >= 10) {
+            await deleteSession(uid);
+            return res.status(403).json({
+                ok: false,
+                error: "CHARACTER_LIMIT_REACHED"
+            });
+        }
+
         if (s.called) {
             return res.status(409).json({
                 ok: false,
@@ -193,7 +208,7 @@ export default withApi("expensive", async (req, res, { uid }) => {
         const raw1 = await callGeminiJSON(
             SYSTEM_FOR_FINAL,
             prompt1,
-            0.4
+            0.5
         );
 
         console.log("[FINAL][RAW1]", raw1);
@@ -394,7 +409,7 @@ export default withApi("expensive", async (req, res, { uid }) => {
 
 
         /* =========================
-           유틸 함수
+           유틸 함수💡
         ========================= */
 
         function clampInt(value, min, max, fallback) {
@@ -447,31 +462,66 @@ scores 의미:
 - willscore: 캐릭터가 가진 의지의 강도
 
 skills 규칙:
-- power는 스킬의 중요도를 의미한다
-- 수치가 높을수록 캐릭터의 핵심 스킬이다
 
-- turns는 스킬 지속 턴 수이며 1~3 정수
-  - 즉발·폭발형 공격일수록 1
-  - 충전, 유지, 필드 변화, 지속 효과는 3에 가깝다
+- power:
+  · 스킬의 서사적 비중과 캐릭터 정체성에서의 핵심도를 의미한다
+  · 단순 위력 수치가 아니다
+  · 값이 높을수록 이 캐릭터를 상징하는 대표 기술이다
+  · longDesc에서 power 수치를 직접 언급하지 말 것
 
-- weights는 각 턴의 중요도를 나타내는 배열이다
-  - 길이는 turns와 반드시 같아야 한다
-  - 각 값은 1~10 정수
-  - 초반 강하고 약해지면 높은 수 → 낮은 수
-  - 후반에 강해지면 낮은 수 → 높은 수
+- turns:
+  · 전투 시스템상 지속 단계 수를 의미하는 내부 값이다 (1~3 정수)
+  · 즉발, 폭발, 단일 행동 중심 기술은 1에 가깝다
+  · 충전, 유지, 영역 형성, 상태 변화 중심 기술은 3에 가깝다
+  · 설명 문장에 턴 수를 직접 쓰지 말 것
+  · "한 턴 동안", "세 단계에 걸쳐" 등의 표현 금지
 
-- impact는 효과의 주 대상이다
-  - 자신에게 더 큰 영향을 주면 "A"
-  - 상대에게 더 큰 영향을 주면 "B"
+- weights:
+  · 각 단계의 영향 강도 분포를 의미하는 내부 배열이다
+  · 길이는 turns와 반드시 동일해야 한다
+  · 각 값은 1~10 정수
+  · 초반 집중형은 높은 수 → 낮은 수
+  · 후반 강화형은 낮은 수 → 높은 수
+  · 균형형은 유사한 값
+  · longDesc에 수치, 단계 구조, 배열 개념을 설명하지 말 것
+
+- impact:
+  · 스킬 효과의 주된 방향성
+  · "A": 사용자 중심 변화, 강화, 각성, 보호, 변이
+  · "B": 상대 중심 변화, 압박, 약화, 지배, 파괴
+  · 설명에 A/B 표기를 직접 언급하지 말 것
+
+- shortDesc:
+  · 한 줄, 핵심 개념만
+  · 최대 20자 내외
+  · 수치 표현 금지
+
+- longDesc:
+  · 2~3문장
+  · 사용 방식, 연출, 효과와 서술 중심
+  · 데미지, 퍼센트, 배율, 숫자 직접 언급 금지
+  · 시스템 용어 직접 언급 금지
+  · 수치를 서사로 치환하여 표현
+
 
 
 traits 규칙:
-- physical, intellectual은 1~10 정수
-- alignment는 반드시 선 / 중립 / 악 중 하나
-- growth는 최대 3문장
+- physical: 육체적 전투 능력, 체력, 반사신경을 종합 판단하여 1~10 정수
+- intellectual: 전략, 통찰, 상황 판단 능력을 종합하여 1~10 정수
+- alignment:
+   · 선: 타인의 생존과 질서를 우선
+   · 중립: 개인의 기준과 상황 중심
+   · 악: 자신의 목표를 위해 타인을 희생 가능
+- 반드시 위 셋 중 하나만 출력
+- growth:
+   · 이 인물이 앞으로 어떻게 더 강해질 수 있는지
+   · 무엇을 극복해야 성장하는지
+   · 최대 3문장
+   · 추상적 문장 금지
+
 `,
             prompt2,
-            0.4
+            0.3
         );
 
         console.log("[FINAL][RAW2]", raw2);
@@ -499,114 +549,124 @@ traits 규칙:
             featuresLength: features.length,
             skillsCount: result2.skills?.length
         });
-
-        await ref.set({
-            uid,
-
-            /* =====================
-               🔤 NAME / LANGUAGE
-            ===================== */
-            displayRawName: input.name,
-            name: output.name,
-         
-            needKorean: !!output.needKorean,
-
-            /* =====================
-               🔍 SAFETY SCORES
-            ===================== */
-            safety: {
-                nameSafetyScore: s.metaSafety?.nameSafetyScore ?? output.nameSafetyScore ?? 0,
-                promptSafetyScore: s.metaSafety?.promptSafetyScore ?? output.promptSafetyScore ?? 0,
-            },
-
-
-            /* =====================
-               🧠 PROMPT
-            ===================== */
-            promptRaw: input.prompt || "",
-            promptRefined: output.intro || "",
-
-            /* =====================
-               📖 CHARACTER META
-            ===================== */
-            existence: output.existence || "",
-            canSpeak: !!output.canSpeak || "",
-            narrationStyle: output.narrationStyle || "",
-            speechStyle: output.speechStyle || "",
-            profile: output.profile || "",
-
-            originId: input.origin?.id,
-            origin: input.origin?.name,
-            originDesc: input.origin?.desc,
-
-            regionId: input.region?.id,
-            region: input.region?.name,
-            regionDetail: input.region?.detail,
-
-            /* =====================
-               📚 STORY
-            ===================== */
-            fullStory: formattedStory,
-
-            features,
-            storyTheme: output.theme || "",
-            storyScore,
-
-            /* =====================
-               🎲 GAME DATA
-            ===================== */
-            traits: result2.traits || {},
-            scores: result2.scores || {},
-            skills: result2.skills,
-
-            rankScore: 1000,
-            battleCount: 0,
-
-            createdAt: new Date()
-        });
-
-        // ===============================
-        // 👤 USER charCount +1
-        // ===============================
-        const userRef = db.collection("users").doc(uid);
+        try {
         await db.runTransaction(async (tx) => {
-            const snap = await tx.get(userRef);
-            const current = snap.exists ? snap.data().charCount || 0 : 0;
-            tx.set(
-                userRef,
-                { charCount: current + 1 },
-                { merge: true }
-            );
+
+            const userSnap = await tx.get(userRef);
+            const current = userSnap.exists ? userSnap.data().charCount || 0 : 0;
+
+            if (current >= 10) {
+                throw new Error("CHARACTER_LIMIT_REACHED");
+            }
+
+            // 1️⃣ 캐릭터 저장
+            tx.set(ref, {
+                uid,
+                displayRawName: input.name,
+                name: output.name,
+                needKorean: !!output.needKorean,
+
+                safety: {
+                    nameSafetyScore: s.metaSafety?.nameSafetyScore ?? output.nameSafetyScore ?? 0,
+                    promptSafetyScore: s.metaSafety?.promptSafetyScore ?? output.promptSafetyScore ?? 0,
+                },
+
+                promptRaw: input.prompt || "",
+                promptRefined: output.intro || "",
+
+                existence: output.existence || "",
+                canSpeak: !!output.canSpeak,
+                narrationStyle: output.narrationStyle || "",
+                speechStyle: output.speechStyle || "",
+                profile: output.profile || "",
+
+                originId: input.origin?.id,
+                origin: input.origin?.name,
+                originDesc: input.origin?.desc,
+
+                regionId: input.region?.id,
+                region: input.region?.name,
+                regionDetail: input.region?.detail,
+
+                fullStory: formattedStory,
+                features,
+                storyTheme: output.theme || "",
+                storyScore,
+
+                traits: result2.traits || {},
+                scores: result2.scores || {},
+                skills: result2.skills,
+
+                rankScore: 1000,
+                battleCount: 0,
+                createdAt: new Date()
+            });
+
+            // 2️⃣ charCount 증가
+            tx.set(userRef, {
+                charCount: current + 1
+            }, { merge: true });
+
         });
+        } catch (err) {
+
+            if (err.message === "CHARACTER_LIMIT_REACHED") {
+                await deleteSession(uid);
+                return res.status(403).json({
+                    ok: false,
+                    error: "CHARACTER_LIMIT_REACHED"
+                });
+            }
+
+            throw err;
+        }
 
 
         /* ------------------------
-           REGION POST-PROCESS
-        ------------------------- */
+   REGION POST-PROCESS (SAFE VERSION)
+------------------------- */
+
         try {
             const regionId = input.region?.id;
-            if (regionId && !regionId.endsWith("_DEFAULT")) {
-                const regionRef = db.collection("regionsUsers").doc(regionId);
-                const snap = await regionRef.get();
-                if (snap.exists) {
-                    const data = snap.data();
-                    const currentNum = data.charnum || 0;
 
-                    const updateData = { charnum: currentNum + 1 };
+            if (regionId && !regionId.endsWith("_DEFAULT")) {
+
+                const regionRef = db.collection("regionsUsers").doc(regionId);
+
+                await db.runTransaction(async (tx) => {
+
+                    const regionSnap = await tx.get(regionRef);
+                    if (!regionSnap.exists) throw "NO_REGION";
+
+                    const region = regionSnap.data();
+
+                    // 🔒 owner 검증 (트랜잭션 안에서)
+                    if (region.owner !== uid) {
+                        throw "NOT_REGION_OWNER";
+                    }
+
+                    const currentNum = region.charnum || 0;
+
+                    const updateData = {
+                        charnum: currentNum + 1
+                    };
+
+                    // 최초 캐릭터면 ownerchar 지정
                     if (currentNum === 0) {
                         updateData.ownerchar = {
-                            name: output.name,
-                            id: ref.id
+                            id: ref.id,
+                            name: output.name
                         };
                     }
 
-                    await regionRef.update(updateData);
-                }
+                    tx.update(regionRef, updateData);
+                });
             }
 
         } catch (err) {
             console.error("REGION_UPDATE_FAIL:", err);
         }
+
         try {
             await deleteSession(uid);
         } catch (e) {

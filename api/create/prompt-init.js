@@ -10,6 +10,8 @@ import { ORIGINS } from "../base/data/origins.js";
 import { getSession, setSession, deleteSession } from "../base/sessionstore.js";
 
 import { callAI } from "./promptinit-ai.js";
+import { applyUserMetaDelta } from "./_internal/user-meta-update.js";
+
 
 
 
@@ -128,7 +130,29 @@ export default withApi("expensive", async (req, res, { uid }) => {
         return res.status(400).json({ ok: false, error: "MISMATCH_REGION" });
     }
 
-   
+    // ===============================
+    // 🔥 두루마리 5개 차감 (AI 호출 전)
+    // ===============================
+    let userMeta;
+    try {
+        userMeta = await applyUserMetaDelta(uid, {
+            scrollDelta: -5
+        });
+    } catch (err) {
+        if (err.code === "INSUFFICIENT_SCROLL") {
+            return res.status(403).json({
+                ok: false,
+                error: "INSUFFICIENT_SCROLL"
+            });
+        }
+
+        console.error("[prompt-init] scroll deduction error:", err);
+        return res.status(500).json({
+            ok: false,
+            error: "SCROLL_DEDUCTION_FAILED"
+        });
+    }
+
     // === 6. 세션 생성 (세션 없을 때만) ===
     await setSession(uid, {
         nowFlow: {
@@ -162,8 +186,10 @@ export default withApi("expensive", async (req, res, { uid }) => {
 
             return res.status(200).json({
                 ok: true,
-                flow: "refine"
+                flow: "refine",
+                userMeta   // 🔥 추가
             });
+
 
         } catch (err) {
             console.error("[prompt-init][REFINE BLOCKED]", err.message);
