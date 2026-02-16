@@ -50,9 +50,7 @@ export default withApi("protected", async (req, res, { uid }) => {
             return res.status(404).json({ error: "캐릭터 없음" });
         }
 
-        if (charSnap.data().uid !== uid) {
-            return res.status(403).json({ error: "본인 캐릭터 아님" });
-        }
+      
 
         /* =========================================================
            battles 조회 (myId / enemyId 두 조건 병합)

@@ -161,7 +161,12 @@ export default withApi("expensive", async (req, res, { uid }) => {
     }
 
     const data = snap.data();
-
+    if (data.uid !== uid) {
+        return res.status(403).json({
+            ok: false,
+            error: "NOT_OWNER"
+        });
+    }
 
     const result = await buildImagePromptAndScore({
         promptRefined: data.promptRefined,
