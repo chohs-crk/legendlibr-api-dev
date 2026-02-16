@@ -10,9 +10,11 @@ import { getSession, deleteSession, setSession } from "../base/sessionstore.js";
 
 import {
     SYSTEM_FOR_FINAL,
+    SYSTEM_FOR_STATS,
     buildFinalEndingPrompt,
     buildFinalStatsPrompt
 } from "./final.prompt.js";
+
 
 
 
@@ -23,7 +25,7 @@ async function callGeminiJSON(systemText, userText, temperature = 0.3) {
     const MODEL_ID = "gemini-2.5-flash-lite";
     const API_VERSION = "v1beta";
 
-    const MAX_RETRY = 3;
+    const MAX_RETRY = 2;
     let attempt = 0;
 
     while (attempt < MAX_RETRY) {
@@ -205,30 +207,44 @@ export default withApi("expensive", async (req, res, { uid }) => {
         });
        
 
-        const raw1 = await callGeminiJSON(
-            SYSTEM_FOR_FINAL,
-            prompt1,
-            0.5
-        );
-
-        console.log("[FINAL][RAW1]", raw1);
-       
-       
-
         let result1;
-        try {
-            result1 = JSON.parse(raw1);
-            assertValidEnding(result1);
-        } catch (err) {
-            return res.status(500).json({
-                ok: false,
-                error: "AI_ENDING_INVALID",
-                reason: String(err)
-            });
+        let ending;
+        let features;
+
+        for (let formatAttempt = 0; formatAttempt < 2; formatAttempt++) {
+
+            const raw1 = await callGeminiJSON(
+                SYSTEM_FOR_FINAL,
+                prompt1,
+                0.5
+            );
+
+            try {
+                result1 = JSON.parse(raw1);
+                assertValidEnding(result1);
+
+                ending = result1.ending || "";
+                features = Array.isArray(result1.features)
+                    ? result1.features
+                    : [];
+
+                break; // 성공
+
+            } catch (err) {
+
+                if (formatAttempt === 1) {
+                    await deleteSession(uid);
+                    return res.status(500).json({
+                        ok: false,
+                        error: "AI_ENDING_INVALID",
+                        reason: String(err)
+                    });
+                }
+
+                console.warn("[FINAL][ENDING_FORMAT_RETRY]", { uid });
+            }
         }
 
-        const ending = result1.ending || "";
-        const features = Array.isArray(result1.features) ? result1.features : [];
 
         /* ------------------------
            fullStory 조립 (시간순 + 선택지)
@@ -436,109 +452,43 @@ export default withApi("expensive", async (req, res, { uid }) => {
         /* ------------------------
            AI CALL #2 : TRAITS + SCORES + SKILLS
         ------------------------- */
+        let result2;
         const prompt2 = buildFinalStatsPrompt({
             input,
             output,
             fullStory
         });
-     
 
-        const raw2 = await callGeminiJSON(
-            `
-반드시 JSON만 반환한다.
+        for (let formatAttempt = 0; formatAttempt < 2; formatAttempt++) {
 
-[점수 체계 규칙]
-모든 점수는 1에서 10 사이의 정수다.
+            const raw2 = await callGeminiJSON(
+                SYSTEM_FOR_STATS,
+                prompt2,
+                0.3
+            );
 
-scores 의미:
-- combatScore: 전투에 강한 정도
-- supportScore: 보조에 강한 정도
-- worldScore: 세계관과 어울리는 정도
-- narrativeScore: 서사가 다채로운 정도
-- charmScore: 캐릭터의 매력도
-- dominateScore: 상대의 특성을 무시하고 지배하는 정도
-- metaScore: 이 게임 세계가 허구임을 인지하는 정도
-- ruleBreakScore: 게임 규칙을 재정의하는 정도
-- willscore: 캐릭터가 가진 의지의 강도
+            console.log("[FINAL][RAW2]", raw2);
 
-skills 규칙:
+            try {
+                result2 = JSON.parse(raw2);
+                assertValidStats(result2);
+                break;
 
-- power:
-  · 스킬의 서사적 비중과 캐릭터 정체성에서의 핵심도를 의미한다
-  · 단순 위력 수치가 아니다
-  · 값이 높을수록 이 캐릭터를 상징하는 대표 기술이다
-  · longDesc에서 power 수치를 직접 언급하지 말 것
+            } catch (err) {
 
-- turns:
-  · 전투 시스템상 지속 단계 수를 의미하는 내부 값이다 (1~3 정수)
-  · 즉발, 폭발, 단일 행동 중심 기술은 1에 가깝다
-  · 충전, 유지, 영역 형성, 상태 변화 중심 기술은 3에 가깝다
-  · 설명 문장에 턴 수를 직접 쓰지 말 것
-  · "한 턴 동안", "세 단계에 걸쳐" 등의 표현 금지
+                if (formatAttempt === 1) {
+                    await deleteSession(uid);
+                    return res.status(500).json({
+                        ok: false,
+                        error: "AI_STATS_INVALID",
+                        reason: String(err)
+                    });
+                }
 
-- weights:
-  · 각 단계의 영향 강도 분포를 의미하는 내부 배열이다
-  · 길이는 turns와 반드시 동일해야 한다
-  · 각 값은 1~10 정수
-  · 초반 집중형은 높은 수 → 낮은 수
-  · 후반 강화형은 낮은 수 → 높은 수
-  · 균형형은 유사한 값
-  · longDesc에 수치, 단계 구조, 배열 개념을 설명하지 말 것
-
-- impact:
-  · 스킬 효과의 주된 방향성
-  · "A": 사용자 중심 변화, 강화, 각성, 보호, 변이
-  · "B": 상대 중심 변화, 압박, 약화, 지배, 파괴
-  · 설명에 A/B 표기를 직접 언급하지 말 것
-
-- shortDesc:
-  · 한 줄, 핵심 개념만
-  · 최대 20자 내외
-  · 수치 표현 금지
-
-- longDesc:
-  · 2~3문장
-  · 사용 방식, 연출, 효과와 서술 중심
-  · 데미지, 퍼센트, 배율, 숫자 직접 언급 금지
-  · 시스템 용어 직접 언급 금지
-  · 수치를 서사로 치환하여 표현
-
-
-
-traits 규칙:
-- physical: 육체적 전투 능력, 체력, 반사신경을 종합 판단하여 1~10 정수
-- intellectual: 전략, 통찰, 상황 판단 능력을 종합하여 1~10 정수
-- alignment:
-   · 선: 타인의 생존과 질서를 우선
-   · 중립: 개인의 기준과 상황 중심
-   · 악: 자신의 목표를 위해 타인을 희생 가능
-- 반드시 위 셋 중 하나만 출력
-- growth:
-   · 이 인물이 앞으로 어떻게 더 강해질 수 있는지
-   · 무엇을 극복해야 성장하는지
-   · 최대 3문장
-   · 추상적 문장 금지
-
-`,
-            prompt2,
-            0.3
-        );
-
-        console.log("[FINAL][RAW2]", raw2);
-        
- 
-
-        let result2;
-        try {
-            result2 = JSON.parse(raw2);
-            assertValidStats(result2);
-        } catch (err) {
-            return res.status(500).json({
-                ok: false,
-                error: "AI_STATS_INVALID",
-                reason: String(err)
-            });
+                console.warn("[FINAL][STATS_FORMAT_RETRY]", { uid });
+            }
         }
+
 
         /* ------------------------
            FIRESTORE SAVE

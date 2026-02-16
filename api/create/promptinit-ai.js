@@ -304,7 +304,7 @@ ${prompt}
            - 파싱 실패해도 "서비스 진행은 가능"하게 폴백 처리
            - (필요 시 여기서만 deleteSession/에러로 바꿀 수도 있음)
         ========================= */
-        let speechStyle = "담담하고 절제된 말투, 짧은 문장 위주";
+        let speechStyle = "정보가 없습니다 다른 내용들을 참조해서 생성하시오";
         let narrationStyle = "3인칭 서술, 절제된 어휘, 사건 중심의 간결한 호흡";
         let profile = "없음";
         try {
@@ -344,6 +344,9 @@ ${prompt}
                     if (!parsedStyle || typeof parsedStyle !== "object") {
                         console.warn("[AI][PARSE_FAIL_FINAL][STYLE_FALLBACK]", { uid });
                         parsedStyle = null;
+                        speechStyle = "정보가 없습니다 다른 내용들을 참조해서 생성하시오";
+                        narrationStyle = "3인칭 서술, 절제된 어휘, 사건 중심의 간결한 호흡";
+
                     } else {
                         console.log("[AI][RECOVERED_AFTER_RETRY][STYLE]", { uid });
                     }

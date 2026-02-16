@@ -154,58 +154,98 @@ async function stream(uid, s, res) {
         "Connection": "keep-alive"
     });
 
-    s.called = true;
-    s.resed = false;
-    s.lastCall = Date.now();
-    await setSession(uid, s);
+    let attempt = 0;
+    const MAX_RETRY = 2;
 
     let full = "";
     let sentenceBuffer = "";
-    const prompt = buildPrompt(s);
-
     let inStory = false;
 
-    try {
-        await callStoryAIStream(
-            uid,
-            delta => {
+    const prompt = buildPrompt(s);
 
-                if (typeof delta === "string") {
-                    delta = delta.replace(/#\d+/g, "");
-                }
+    while (attempt < MAX_RETRY) {
+        full = "";
+        sentenceBuffer = "";
+        inStory = false;
 
-                full += delta;
+        try {
 
-                if (!inStory) {
-                    const idx = full.indexOf("<STORY>");
-                    if (idx !== -1) {
-                        inStory = true;
-                        sentenceBuffer = full.substring(idx + 7);
+            s.called = true;
+            s.resed = false;
+            s.lastCall = Date.now();
+            await setSession(uid, s);
+
+            await callStoryAIStream(
+                uid,
+                delta => {
+
+                    if (typeof delta === "string") {
+                        delta = delta.replace(/#\d+/g, "");
                     }
-                    return;
-                }
 
-                sentenceBuffer += delta;
+                    full += delta;
 
-                const m = sentenceBuffer.match(/^([\s\S]*?[.!?])\s+/);
-                if (m) {
-                    const sentence = m[1];
-                    res.write(`data: ${sentence}\n\n`);
-                    sentenceBuffer = sentenceBuffer.slice(m[0].length);
-                }
-            },
-            prompt,
-            STORY1_SYSTEM
-        );
-    } catch (e) {
-        s.called = false;
-        s.resed = false;
-        s.lastCall = 0;
-        await setSession(uid, s);
+                    if (!inStory) {
+                        const idx = full.indexOf("<STORY>");
+                        if (idx !== -1) {
+                            inStory = true;
+                            sentenceBuffer = full.substring(idx + 7);
+                        }
+                        return;
+                    }
+
+                    sentenceBuffer += delta;
+
+                    const m = sentenceBuffer.match(/^([\s\S]*?[.!?])\s+/);
+                    if (m) {
+                        const sentence = m[1];
+                        res.write(`data: ${sentence}\n\n`);
+                        sentenceBuffer = sentenceBuffer.slice(m[0].length);
+                    }
+                },
+                prompt,
+                STORY1_SYSTEM
+            );
+
+            break;
+
+        } catch (err) {
+
+            attempt++;
+
+            if (attempt >= MAX_RETRY) {
+
+                console.error("[STORY1][STREAM_FAIL_FINAL]", { uid });
+
+                await deleteSession(uid);
+
+                res.write(`event: error\ndata: STREAM_FAILED\n\n`);
+                return res.end();
+            }
+
+            console.warn("[STORY1][RETRY]", { uid, attempt });
+        }
+    }
+
+    /* ===============================
+       🔥 포맷 검증
+    =============================== */
+
+    const parsed = parseStory(full);
+
+    if (!parsed.story || parsed.choices.length !== 3) {
+
+        console.error("[STORY1][INVALID_FORMAT]", { uid });
+
+        await deleteSession(uid);
+
+        res.write(`event: error\ndata: INVALID_FORMAT\n\n`);
         return res.end();
     }
 
-    const parsed = parseStory(full);
+    /* ===============================
+       정상 처리
+    =============================== */
 
     res.write(`event: choices\ndata: ${JSON.stringify({
         choices: parsed.choices.map(c => c.text)
@@ -230,6 +270,7 @@ async function stream(uid, s, res) {
     res.write(`event: done\ndata: end\n\n`);
     res.end();
 }
+
 
 
 /* ================================
