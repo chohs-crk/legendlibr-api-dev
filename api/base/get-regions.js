@@ -1,15 +1,10 @@
-export const config = { runtime: "nodejs" };
+Ôªøexport const config = { runtime: "nodejs" };
+
 import { withApi } from "../_utils/withApi.js";
 import { db } from "../../firebaseAdmin.js";
 
-
-
-/* ================================
-   2) ººº« ƒÌ≈∞ √ﬂ√‚
-================================ */
-
-
 export default withApi("protected", async (req, res, { uid }) => {
+
     if (req.method !== "POST") {
         return res.status(405).json({ ok: false, error: "POST_ONLY" });
     }
@@ -20,49 +15,84 @@ export default withApi("protected", async (req, res, { uid }) => {
     }
 
     try {
-        /* --- ±‚∫ª region --- */
+
+        /* =====================================================
+           1Ô∏è‚É£ Í∏∞Î≥∏(Default) Region
+        ===================================================== */
         const baseSnap = await db.collection("regionsDefault")
             .where("originId", "==", originId)
             .get();
 
-        const baseRegions = baseSnap.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data(),
-            source: "default"
-        }));
+        const baseRegions = baseSnap.docs.map(doc => {
+            const data = doc.data();
 
-        /* --- ¿Ø¿˙ region --- */
+            return {
+                id: doc.id,
+                name: data.name || "",
+                detail: data.detail || "",
+                originId: data.originId || "",
+                source: "default"
+            };
+        });
+
+
+        /* =====================================================
+           2Ô∏è‚É£ Ïú†Ï†Ä Region
+        ===================================================== */
         const mySnap = await db.collection("users")
             .doc(uid)
             .collection("myregion")
             .where("originId", "==", originId)
             .get();
 
-        const regionIds = mySnap.docs.map(d => d.data().regionId);
-
+        const regionIds = mySnap.docs
+            .map(d => d.data()?.regionId)
+            .filter(Boolean);
 
         const userRegions = [];
 
         for (const regionId of regionIds) {
-            const snap = await db.collection("regionsUsers").doc(regionId).get();
-            if (snap.exists) {
-                userRegions.push({
-                    id: snap.id,
-                    ...snap.data(),
-                    source: "user"
-                });
-            }
+
+            const snap = await db.collection("regionsUsers")
+                .doc(regionId)
+                .get();
+
+            if (!snap.exists) continue;
+
+            const data = snap.data();
+
+            userRegions.push({
+                id: snap.id,
+                name: data.name || "",
+                detail: data.detail || "",
+                originId: data.originId || "",
+                charnum: Number.isFinite(Number(data.charnum))
+                    ? Number(data.charnum)
+                    : 0,
+                owner: data.owner || null,
+                ownerchar: data.ownerchar && typeof data.ownerchar === "object"
+                    ? {
+                        id: data.ownerchar.id || null,
+                        name: data.ownerchar.name || null
+                    }
+                    : null,
+                source: "user"
+            });
         }
 
 
+        /* =====================================================
+           3Ô∏è‚É£ ÏùëÎãµ
+        ===================================================== */
         return res.status(200).json({
             ok: true,
             regions: [...baseRegions, ...userRegions]
         });
 
-
     } catch (err) {
+
         console.error("get-regions ERROR:", err);
+
         return res.status(500).json({
             ok: false,
             error: "SERVER_ERROR"

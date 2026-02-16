@@ -10,7 +10,7 @@ import { ORIGINS } from "../base/data/origins.js";
 import { getSession, setSession, deleteSession } from "../base/sessionstore.js";
 
 import { callAI } from "./promptinit-ai.js";
-import { applyUserMetaDelta } from "./_internal/user-meta-update.js";
+import { applyUserMetaDelta } from "../base/_internal/user-meta-update.js";
 
 
 
