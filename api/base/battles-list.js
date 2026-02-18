@@ -75,7 +75,21 @@ export default withApi("protected", async (req, res, { uid }) => {
         const battles = await Promise.all(
             pageItems.map(async (b) => {
 
-               
+                let enemyImage = null;
+
+                try {
+                    const enemySnap = await db
+                        .collection("characters")
+                        .doc(b.enemyId)
+                        .get();
+
+                    if (enemySnap.exists) {
+                        enemyImage = enemySnap.data().image || null;
+                    }
+                } catch {
+                    enemyImage = null;
+                }
+
 
              
 
@@ -89,6 +103,7 @@ export default withApi("protected", async (req, res, { uid }) => {
                     enemyId: b.enemyId,
                     myName: b.myName,
                     enemyName: b.enemyName,
+                    enemyImage, // 🔥 추가
                     result: b.result || null,
                     createdAt: b.createdAt || null,
 
