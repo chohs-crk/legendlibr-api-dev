@@ -494,70 +494,135 @@ export default withApi("expensive", async (req, res, { uid }) => {
            FIRESTORE SAVE
         ------------------------- */
         const ref = db.collection("characters").doc();
-        console.log("[FINAL][SAVE_DATA]", {
-            name: output.name,
-            featuresLength: features.length,
-            skillsCount: result2.skills?.length
-        });
+       
         try {
-        await db.runTransaction(async (tx) => {
+            await db.runTransaction(async (tx) => {
 
-            const userSnap = await tx.get(userRef);
-            const current = userSnap.exists ? userSnap.data().charCount || 0 : 0;
+                /* =========================
+                   1️⃣ USER READ
+                ========================= */
+                const userSnap = await tx.get(userRef);
+                const currentCount = userSnap.exists
+                    ? userSnap.data().charCount || 0
+                    : 0;
 
-            if (current >= 10) {
-                throw new Error("CHARACTER_LIMIT_REACHED");
-            }
+                if (currentCount >= 10) {
+                    throw new Error("CHARACTER_LIMIT_REACHED");
+                }
 
-            // 1️⃣ 캐릭터 저장
-            tx.set(ref, {
-                uid,
-                displayRawName: input.name,
-                name: output.name,
-                needKorean: !!output.needKorean,
+                /* =========================
+                   2️⃣ REGION READ (선택)
+                ========================= */
+                const regionId = input.region?.id;
+                let regionRef = null;
+                let regionSnap = null;
+                let regionData = null;
 
-                safety: {
-                    nameSafetyScore: s.metaSafety?.nameSafetyScore ?? output.nameSafetyScore ?? 0,
-                    promptSafetyScore: s.metaSafety?.promptSafetyScore ?? output.promptSafetyScore ?? 0,
-                },
+                if (regionId && !regionId.endsWith("_DEFAULT")) {
 
-                promptRaw: input.prompt || "",
-                promptRefined: output.intro || "",
+                    regionRef = db.collection("regionsUsers").doc(regionId);
+                    regionSnap = await tx.get(regionRef);
 
-                existence: output.existence || "",
-                canSpeak: !!output.canSpeak,
-                narrationStyle: output.narrationStyle || "",
-                speechStyle: output.speechStyle || "",
-                profile: output.profile || "",
+                    if (!regionSnap.exists) {
+                        throw new Error("NO_REGION");
+                    }
 
-                originId: input.origin?.id,
-                origin: input.origin?.name,
-                originDesc: input.origin?.desc,
+                    regionData = regionSnap.data();
 
-                regionId: input.region?.id,
-                region: input.region?.name,
-                regionDetail: input.region?.detail,
+                    // 🔥 새 권한 검증 방식
+                    const myRegionRef = db
+                        .collection("users")
+                        .doc(uid)
+                        .collection("myregion")
+                        .doc(regionId);
 
-                fullStory: formattedStory,
-                features,
-                storyTheme: output.theme || "",
-                storyScore,
+                    const myRegionSnap = await tx.get(myRegionRef);
 
-                traits: result2.traits || {},
-                scores: result2.scores || {},
-                skills: result2.skills,
+                    if (!myRegionSnap.exists) {
+                        throw new Error("REGION_NOT_REGISTERED");
+                    }
+                }
 
-                rankScore: 1000,
-                battleCount: 0,
-                createdAt: new Date()
+                /* =========================
+                   3️⃣ CHARACTER WRITE
+                ========================= */
+                tx.set(ref, {
+                    uid,
+                    displayRawName: input.name,
+                    name: output.name,
+                    needKorean: !!output.needKorean,
+
+                    safety: {
+                        nameSafetyScore:
+                            s.metaSafety?.nameSafetyScore ??
+                            output.nameSafetyScore ??
+                            0,
+                        promptSafetyScore:
+                            s.metaSafety?.promptSafetyScore ??
+                            output.promptSafetyScore ??
+                            0,
+                    },
+
+                    promptRaw: input.prompt || "",
+                    promptRefined: output.intro || "",
+
+                    existence: output.existence || "",
+                    canSpeak: !!output.canSpeak,
+                    narrationStyle: output.narrationStyle || "",
+                    speechStyle: output.speechStyle || "",
+                    profile: output.profile || "",
+
+                    originId: input.origin?.id,
+                    origin: input.origin?.name,
+                    originDesc: input.origin?.desc,
+
+                    regionId: input.region?.id,
+                    region: input.region?.name,
+                    regionDetail: input.region?.detail,
+
+                    fullStory: formattedStory,
+                    features,
+                    storyTheme: output.theme || "",
+                    storyScore,
+
+                    traits: result2.traits || {},
+                    scores: result2.scores || {},
+                    skills: result2.skills,
+
+                    rankScore: 1000,
+                    battleCount: 0,
+                    createdAt: new Date()
+                });
+
+                /* =========================
+                   4️⃣ USER UPDATE
+                ========================= */
+                tx.set(userRef, {
+                    charCount: currentCount + 1
+                }, { merge: true });
+
+                /* =========================
+                   5️⃣ REGION UPDATE (있을 때만)
+                ========================= */
+                if (regionRef) {
+
+                    const currentNum = regionData.charnum || 0;
+
+                    const updateData = {
+                        charnum: currentNum + 1
+                    };
+
+                    if (currentNum === 0) {
+                        updateData.ownerchar = {
+                            id: ref.id,
+                            name: output.name
+                        };
+                    }
+
+                    tx.update(regionRef, updateData);
+                }
+
             });
-
-            // 2️⃣ charCount 증가
-            tx.set(userRef, {
-                charCount: current + 1
-            }, { merge: true });
-
-        });
         } catch (err) {
 
             if (err.message === "CHARACTER_LIMIT_REACHED") {
@@ -568,54 +633,25 @@ export default withApi("expensive", async (req, res, { uid }) => {
                 });
             }
 
-            throw err;
-        }
-
-
-        /* ------------------------
-   REGION POST-PROCESS (SAFE VERSION)
-------------------------- */
-
-        try {
-            const regionId = input.region?.id;
-
-            if (regionId && !regionId.endsWith("_DEFAULT")) {
-
-                const regionRef = db.collection("regionsUsers").doc(regionId);
-
-                await db.runTransaction(async (tx) => {
-
-                    const regionSnap = await tx.get(regionRef);
-                    if (!regionSnap.exists) throw "NO_REGION";
-
-                    const region = regionSnap.data();
-
-                    // 🔒 owner 검증 (트랜잭션 안에서)
-                    if (region.owner !== uid) {
-                        throw "NOT_REGION_OWNER";
-                    }
-
-                    const currentNum = region.charnum || 0;
-
-                    const updateData = {
-                        charnum: currentNum + 1
-                    };
-
-                    // 최초 캐릭터면 ownerchar 지정
-                    if (currentNum === 0) {
-                        updateData.ownerchar = {
-                            id: ref.id,
-                            name: output.name
-                        };
-                    }
-
-                    tx.update(regionRef, updateData);
+            if (err.message === "NO_REGION") {
+                await deleteSession(uid);
+                return res.status(400).json({
+                    ok: false,
+                    error: "NO_REGION"
                 });
             }
 
-        } catch (err) {
-            console.error("REGION_UPDATE_FAIL:", err);
+            if (err.message === "REGION_NOT_REGISTERED") {
+                await deleteSession(uid);
+                return res.status(403).json({
+                    ok: false,
+                    error: "REGION_NOT_REGISTERED"
+                });
+            }
+
+            throw err;
         }
+
 
         try {
             await deleteSession(uid);

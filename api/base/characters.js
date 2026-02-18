@@ -233,6 +233,6 @@ export default withApi("protected", async (req, res, { uid }) => {
 
     } catch (e) {
         console.error("CHARACTERS API ERROR:", e);
-        return res.status(401).json({ error: "서버 오류" });
+        return res.status(500).json({ error: "서버 오류" });
     }
 });

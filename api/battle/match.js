@@ -63,10 +63,15 @@ export default withApi("protected", async (req, res, { uid }) => {
     if (myChar.enemyId) {
         const ref = db.collection("characters").doc(myChar.enemyId);
         const snap = await ref.get();
+
         if (snap.exists) {
             enemySnap = snap;
+        } else {
+            // 🔥 존재하지 않는 enemyId 정리
+            await myRef.update({ enemyId: null });
         }
     }
+
 
     /* =========================
        3️⃣ 매칭 대상 탐색
