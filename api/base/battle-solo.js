@@ -1,8 +1,7 @@
 ﻿/* =========================================================
    /api/battle-solo
    GET /api/battle-solo?id=XXX
-   🔥 finished 여부 상관없이 조회
-   🔥 화이트리스트 구조 반환
+   상태 기반 반환 구조
 ========================================================= */
 
 export const config = {
@@ -12,19 +11,22 @@ export const config = {
 import { withApi } from "../_utils/withApi.js";
 import { db } from "../../firebaseAdmin.js";
 
+const STREAM_ERROR_DELAY_MS = 5000; // 🔥 stream_error 후 노출 대기 시간
+
 export default withApi("protected", async (req, res) => {
 
     try {
         const id = req.query.id;
-      
         if (!id) {
             return res.status(400).json({ error: "id 필요" });
         }
 
         const onlyLogs = req.query.onlyLogs === "1";
 
+        /* =========================================================
+           1️⃣ logs만 요청 (done 상태에서만 사용)
+        ========================================================== */
         if (onlyLogs) {
-            let logs = [];
 
             const logSnap = await db
                 .collection("battles")
@@ -33,7 +35,7 @@ export default withApi("protected", async (req, res) => {
                 .orderBy("createdAt", "asc")
                 .get();
 
-            logs = logSnap.docs.map(d => ({
+            const logs = logSnap.docs.map(d => ({
                 text: d.data().text || ""
             }));
 
@@ -43,36 +45,59 @@ export default withApi("protected", async (req, res) => {
             });
         }
 
-        const snap = await db.collection("battles").doc(id).get();
+        /* =========================================================
+           2️⃣ battle 문서 조회
+        ========================================================== */
 
+        const snap = await db.collection("battles").doc(id).get();
 
         if (!snap.exists) {
             return res.status(404).json({ error: "전투 없음" });
         }
 
         const b = snap.data();
+        const status = b.status || "unknown";
 
-        // 🔥 finished 체크 제거 (진행 중도 조회 가능)
+        // createdAt ISO 변환
+        let createdAtISO = null;
+        if (typeof b.createdAt?.toMillis === "function") {
+            createdAtISO = new Date(b.createdAt.toMillis()).toISOString();
+        }
 
         /* =========================================================
-           서브컬렉션 logs 조회
+           3️⃣ queued / processing → logs 조회 안 함
         ========================================================== */
-        let logs = [];
+        if (status === "queued" || status === "processing") {
 
-        try {
-            const logSnap = await db
-                .collection("battles")
-                .doc(id)
-                .collection("logs")
-                .orderBy("createdAt", "asc")
-                .get();
-
-            logs = logSnap.docs.map(d => ({
-                text: d.data().text || ""
-            }));
-        } catch {
-            logs = [];
+            return res.status(200).json({
+                id,
+                myId: b.myId,
+                enemyId: b.enemyId,
+                myName: b.myName,
+                enemyName: b.enemyName,
+                createdAt: createdAtISO,
+                logs: [],
+                winnerId: null,
+                loserId: null,
+                status
+            });
         }
+
+        /* =========================================================
+           4️⃣ streaming / done / stream_error → logs 조회
+        ========================================================== */
+
+        const logSnap = await db
+            .collection("battles")
+            .doc(id)
+            .collection("logs")
+            .orderBy("createdAt", "asc")
+            .get();
+
+        const logs = logSnap.docs.map(d => ({
+            text: d.data().text || ""
+        }));
+
         const now = Date.now();
         const finishedAtMs =
             typeof b.finishedAt?.toMillis === "function"
@@ -81,16 +106,51 @@ export default withApi("protected", async (req, res) => {
 
         let winnerId = null;
         let loserId = null;
+        let retryAfterMs = null;
 
-        const isDone = b.status === "done";
-        const isStreamError = b.status === "stream_error";
-
-        const passed10Sec =
-            finishedAtMs && (now - finishedAtMs >= 10000);
-
-        if (isDone || (isStreamError && passed10Sec)) {
+        /* ============================
+           done
+        ============================ */
+        if (status === "done") {
             winnerId = b.winnerId || null;
             loserId = b.loserId || null;
+        }
+
+        /* ============================
+           stream_error
+        ============================ */
+        if (status === "stream_error") {
+
+            if (finishedAtMs) {
+
+                const elapsed = now - finishedAtMs;
+                const remain = STREAM_ERROR_DELAY_MS - elapsed;
+
+                if (remain > 0) {
+                    retryAfterMs = remain + 500; // 🔥 0.5초 버퍼 포함
+                } else {
+                    winnerId = b.winnerId || null;
+                    loserId = b.loserId || null;
+                }
+            }
+        }
+
+        /* ============================
+           error (즉시 종료)
+        ============================ */
+        if (status === "error") {
+            return res.status(200).json({
+                id,
+                myId: b.myId,
+                enemyId: b.enemyId,
+                myName: b.myName,
+                enemyName: b.enemyName,
+                createdAt: createdAtISO,
+                logs: [],
+                winnerId: null,
+                loserId: null,
+                status: "error"
+            });
         }
 
         return res.status(200).json({
@@ -99,12 +159,12 @@ export default withApi("protected", async (req, res) => {
             enemyId: b.enemyId,
             myName: b.myName,
             enemyName: b.enemyName,
-           
-            createdAt: b.createdAt || null,
+            createdAt: createdAtISO,
             logs,
             winnerId,
             loserId,
-            status: b.status || "unknown"
+            status,
+            retryAfterMs
         });
 
     } catch (err) {
