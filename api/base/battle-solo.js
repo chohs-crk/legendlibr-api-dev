@@ -1,124 +1,59 @@
-import { resolveCharImage } from "/base/common/image-util.js";
-import { apiFetch } from "/base/api.js";
+export const config = {
+    runtime: "nodejs"
+};
 
-function parseStoryText(raw) {
-    if (!raw) return "";
-    let html = String(raw);
+import { withApi } from "../_utils/withApi.js";
+import { db } from "../../firebaseAdmin.js";
 
-    html = html.replace(/story-(em|talk|skill)\"?>/gi, "");
-    html = html.replace(/<span[^>]*>/gi, "");
-    html = html.replace(/<\/span>/gi, "");
-    html = html.replace(/&lt;\/?span[^&]*&gt;/gi, "");
-
-    html = html.replace(/\*\*(.+?)\*\*/g, (_, txt) =>
-        `<span class="story-em">${txt}</span>`
-    );
-
-    html = html.replace(/§([^§]+?)§/g, (_, txt) =>
-        `"${'<span class="story-talk">' + txt + "</span>"}"`
-    );
-
-    html = html.replace(/『(.+?)』/g, (_, txt) =>
-        `『<span class="story-skill">${txt}</span>』`
-    );
-
-    html = html.replace(/\r\n/g, "\n");
-    html = html.replace(/\n{2,}/g, "<br><br>");
-    html = html.replace(/\n/g, " ");
-
-    return html.trim();
-}
-
-function getCachedBattle(id) {
-    const raw = sessionStorage.getItem("battleCacheMap");
-    if (!raw) return null;
-
+export default withApi("protected", async (req, res) => {
     try {
-        const map = JSON.parse(raw);
-        return map[id] || null;
-    } catch {
-        return null;
-    }
-}
+        const id = req.query.id;
 
-function cacheBattle(battle) {
-    const raw = sessionStorage.getItem("battleCacheMap");
-    const map = raw ? JSON.parse(raw) : {};
-
-    map[battle.id] = battle;
-
-    sessionStorage.setItem("battleCacheMap", JSON.stringify(map));
-}
-
-async function fetchBattleById(id) {
-    const res = await apiFetch(
-        `/base/battle-solo?id=${encodeURIComponent(id)}`
-    );
-
-    if (!res.ok) return null;
-
-    return await res.json();
-}
-
-export async function initBattleLogPage(battleId) {
-    const container = document.getElementById("battleLogContainer");
-
-    if (!battleId) {
-        battleId = sessionStorage.getItem("viewBattleId");
-    }
-
-    if (!battleId) {
-        container.innerHTML = "<div>전투 기록이 없습니다.</div>";
-        return;
-    }
-
-    let battle = getCachedBattle(battleId);
-
-    if (!battle) {
-        container.innerHTML = "<div>전투 기록 불러오는 중...</div>";
-
-        battle = await fetchBattleById(battleId);
-
-        if (battle) {
-            cacheBattle(battle);
+        if (!id) {
+            return res.status(400).json({ error: "id 필요" });
         }
+
+        const snap = await db.collection("battles").doc(id).get();
+
+        if (!snap.exists) {
+            return res.status(404).json({ error: "전투 없음" });
+        }
+
+        const b = snap.data();
+
+        if (!b.finished) {
+            return res.status(400).json({ error: "완료되지 않은 전투" });
+        }
+
+        // 상대 이미지 조회
+        let enemyImage = null;
+
+        try {
+            const enemySnap = await db
+                .collection("characters")
+                .doc(b.enemyId)
+                .get();
+
+            if (enemySnap.exists) {
+                enemyImage = enemySnap.data().image || null;
+            }
+        } catch { }
+
+        return res.status(200).json({
+            id,
+            myId: b.myId,
+            enemyId: b.enemyId,
+            myName: b.myName,
+            enemyName: b.enemyName,
+            enemyImage,
+            result: b.result,
+            createdAt: b.createdAt,
+            prologue: b.baseData?.prologue || "",
+            logs: b.logs || []
+        });
+
+    } catch (err) {
+        console.error("BATTLE API ERROR:", err);
+        return res.status(500).json({ error: "서버 오류" });
     }
-
-    if (!battle) {
-        container.innerHTML = "<div>전투 기록을 불러올 수 없습니다.</div>";
-        return;
-    }
-
-    const enemyImg = resolveCharImage(battle.enemyImage);
-
-    const sections = [];
-
-    if (battle.prologue) {
-        sections.push(`<h3>전투 개시</h3>${parseStoryText(battle.prologue)}`);
-    }
-
-    const logs = battle.logs || [];
-
-    logs.forEach(log => {
-        const skillA = log.skillAName || "행동";
-        const narration = log.narration || "";
-
-        sections.push(`
-            <div class="battle-section">
-                <div class="battle-skill">${skillA}</div>
-                <div class="battle-text">${parseStoryText(narration)}</div>
-            </div>
-        `);
-    });
-
-    container.innerHTML = `
-        <div class="battle-log-header">
-            <img src="${enemyImg}" />
-            <h2>${battle.enemyName || "전투"}</h2>
-        </div>
-
-        <div class="battle-log-body">
-            ${sections.join("<hr>")}
-        </div>
-    `;
-}
+});
