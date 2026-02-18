@@ -73,6 +73,25 @@ export default withApi("protected", async (req, res) => {
         } catch {
             logs = [];
         }
+        const now = Date.now();
+        const finishedAtMs =
+            typeof b.finishedAt?.toMillis === "function"
+                ? b.finishedAt.toMillis()
+                : null;
+
+        let winnerId = null;
+        let loserId = null;
+
+        const isDone = b.status === "done";
+        const isStreamError = b.status === "stream_error";
+
+        const passed10Sec =
+            finishedAtMs && (now - finishedAtMs >= 10000);
+
+        if (isDone || (isStreamError && passed10Sec)) {
+            winnerId = b.winnerId || null;
+            loserId = b.loserId || null;
+        }
 
         return res.status(200).json({
             id,
@@ -83,8 +102,8 @@ export default withApi("protected", async (req, res) => {
            
             createdAt: b.createdAt || null,
             logs,
-            winnerId: b.winnerId || null,
-            loserId: b.loserId || null,
+            winnerId,
+            loserId,
             status: b.status || "unknown"
         });
 

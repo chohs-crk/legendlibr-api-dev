@@ -96,6 +96,32 @@ export default withApi("protected", async (req, res, { uid }) => {
                 const preview = typeof b.previewText === "string"
                     ? b.previewText
                     : "";
+                const createdAtMs =
+                    typeof b.createdAt?.toMillis === "function"
+                        ? b.createdAt.toMillis()
+                        : (typeof b.createdAt?.seconds === "number" ? b.createdAt.seconds * 1000 : null);
+
+                const createdAtISO = createdAtMs ? new Date(createdAtMs).toISOString() : null;
+
+                const now = Date.now();
+                const finishedAtMs =
+                    typeof b.finishedAt?.toMillis === "function"
+                        ? b.finishedAt.toMillis()
+                        : null;
+
+                let winnerId = null;
+                let loserId = null;
+
+                const isDone = b.status === "done";
+                const isStreamError = b.status === "stream_error";
+
+                const passed10Sec =
+                    finishedAtMs && (now - finishedAtMs >= 10000);
+
+                if (isDone || (isStreamError && passed10Sec)) {
+                    winnerId = b.winnerId || null;
+                    loserId = b.loserId || null;
+                }
 
                 return {
                     id: b.id,
@@ -103,18 +129,15 @@ export default withApi("protected", async (req, res, { uid }) => {
                     enemyId: b.enemyId,
                     myName: b.myName,
                     enemyName: b.enemyName,
-                    enemyImage, // 🔥 추가
-                   
-                    createdAt: b.createdAt || null,
-
-                    // 🔥 preview만 logs 배열로 변환
+                    enemyImage,
+                    createdAt: createdAtISO,
                     logs: preview ? [{ text: preview }] : [],
-
-                    winnerId: b.winnerId || null,
-                    loserId: b.loserId || null,
+                    winnerId,
+                    loserId,
                     finished: b.finished === true,
                     status: b.status || "unknown"
                 };
+
 
             })
         );
