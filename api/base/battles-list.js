@@ -104,7 +104,7 @@ export default withApi("protected", async (req, res, { uid }) => {
                     myName: b.myName,
                     enemyName: b.enemyName,
                     enemyImage, // 🔥 추가
-                    result: b.result || null,
+                   
                     createdAt: b.createdAt || null,
 
                     // 🔥 preview만 logs 배열로 변환
@@ -112,6 +112,7 @@ export default withApi("protected", async (req, res, { uid }) => {
 
                     winnerId: b.winnerId || null,
                     loserId: b.loserId || null,
+                    finished: b.finished === true,
                     status: b.status || "unknown"
                 };
 

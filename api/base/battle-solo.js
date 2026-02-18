@@ -80,7 +80,7 @@ export default withApi("protected", async (req, res) => {
             enemyId: b.enemyId,
             myName: b.myName,
             enemyName: b.enemyName,
-            result: b.result || null,
+           
             createdAt: b.createdAt || null,
             logs,
             winnerId: b.winnerId || null,
