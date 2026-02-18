@@ -1,3 +1,10 @@
+ï»¿/* =========================================================
+   /api/battle-solo
+   GET /api/battle-solo?id=XXX
+   ðŸ”¥ finished ì—¬ë¶€ ìƒê´€ì—†ì´ ì¡°íšŒ
+   ðŸ”¥ í™”ì´íŠ¸ë¦¬ìŠ¤íŠ¸ êµ¬ì¡° ë°˜í™˜
+========================================================= */
+
 export const config = {
     runtime: "nodejs"
 };
@@ -6,38 +13,66 @@ import { withApi } from "../_utils/withApi.js";
 import { db } from "../../firebaseAdmin.js";
 
 export default withApi("protected", async (req, res) => {
+
     try {
         const id = req.query.id;
-
+      
         if (!id) {
-            return res.status(400).json({ error: "id ÇÊ¿ä" });
+            return res.status(400).json({ error: "id í•„ìš”" });
+        }
+
+        const onlyLogs = req.query.onlyLogs === "1";
+
+        if (onlyLogs) {
+            let logs = [];
+
+            const logSnap = await db
+                .collection("battles")
+                .doc(id)
+                .collection("logs")
+                .orderBy("createdAt", "asc")
+                .get();
+
+            logs = logSnap.docs.map(d => ({
+                text: d.data().text || ""
+            }));
+
+            return res.status(200).json({
+                id,
+                logs
+            });
         }
 
         const snap = await db.collection("battles").doc(id).get();
 
+
         if (!snap.exists) {
-            return res.status(404).json({ error: "ÀüÅõ ¾øÀ½" });
+            return res.status(404).json({ error: "ì „íˆ¬ ì—†ìŒ" });
         }
 
         const b = snap.data();
 
-        if (!b.finished) {
-            return res.status(400).json({ error: "¿Ï·áµÇÁö ¾ÊÀº ÀüÅõ" });
-        }
+        // ðŸ”¥ finished ì²´í¬ ì œê±° (ì§„í–‰ ì¤‘ë„ ì¡°íšŒ ê°€ëŠ¥)
 
-        // »ó´ë ÀÌ¹ÌÁö Á¶È¸
-        let enemyImage = null;
+        /* =========================================================
+           ì„œë¸Œì»¬ë ‰ì…˜ logs ì¡°íšŒ
+        ========================================================== */
+        let logs = [];
 
         try {
-            const enemySnap = await db
-                .collection("characters")
-                .doc(b.enemyId)
+            const logSnap = await db
+                .collection("battles")
+                .doc(id)
+                .collection("logs")
+                .orderBy("createdAt", "asc")
                 .get();
 
-            if (enemySnap.exists) {
-                enemyImage = enemySnap.data().image || null;
-            }
-        } catch { }
+            logs = logSnap.docs.map(d => ({
+                text: d.data().text || ""
+            }));
+        } catch {
+            logs = [];
+        }
 
         return res.status(200).json({
             id,
@@ -45,15 +80,16 @@ export default withApi("protected", async (req, res) => {
             enemyId: b.enemyId,
             myName: b.myName,
             enemyName: b.enemyName,
-            enemyImage,
-            result: b.result,
-            createdAt: b.createdAt,
-            prologue: b.baseData?.prologue || "",
-            logs: b.logs || []
+            result: b.result || null,
+            createdAt: b.createdAt || null,
+            logs,
+            winnerId: b.winnerId || null,
+            loserId: b.loserId || null,
+            status: b.status || "unknown"
         });
 
     } catch (err) {
-        console.error("BATTLE API ERROR:", err);
-        return res.status(500).json({ error: "¼­¹ö ¿À·ù" });
+        console.error("BATTLE-SOLO ERROR:", err);
+        return res.status(500).json({ error: "ì„œë²„ ì˜¤ë¥˜" });
     }
 });
