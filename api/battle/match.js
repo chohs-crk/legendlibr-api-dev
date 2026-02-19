@@ -1,10 +1,6 @@
 ﻿/* api/battle/match.js */
 import { withApi } from "../_utils/withApi.js";
 import { db } from "../../firebaseAdmin.js";
-import {
-    getBattleSession,
-    setBattleSession
-} from "../base/sessionstore.js";
 
 export default withApi("protected", async (req, res, { uid }) => {
     if (req.method !== "POST") {
@@ -14,30 +10,6 @@ export default withApi("protected", async (req, res, { uid }) => {
     const { charId } = req.body;
     if (!charId) {
         return res.status(400).json({ error: "NO_CHAR_ID" });
-    }
-
-    /* =========================
-       0️⃣ 기존 battle 세션 재사용
-    ========================= */
-    const existingBattle = await getBattleSession(uid);
-
-    if (existingBattle?.myChar?.id === charId) {
-        console.log("========== [BATTLE SESSION REUSE] ==========");
-        console.log("uid:", uid);
-        console.log(JSON.stringify(existingBattle, null, 2));
-        console.log("============================================");
-
-        return res.json({
-            matched: true,
-            myChar: {
-                id: existingBattle.myChar.id,
-                displayRawName: existingBattle.myChar.displayRawName
-            },
-            enemyChar: {
-                id: existingBattle.enemyChar.id,
-                displayRawName: existingBattle.enemyChar.displayRawName
-            }
-        });
     }
 
     /* =========================
@@ -51,12 +23,13 @@ export default withApi("protected", async (req, res, { uid }) => {
     }
 
     const myChar = mySnap.data();
+
     if (myChar.uid !== uid) {
         return res.status(403).json({ error: "NOT_YOUR_CHAR" });
     }
 
     /* =========================
-       2️⃣ 기존 enemyId 재사용
+       2️⃣ 기존 enemyId 재사용 시도
     ========================= */
     let enemySnap = null;
 
@@ -67,14 +40,13 @@ export default withApi("protected", async (req, res, { uid }) => {
         if (snap.exists) {
             enemySnap = snap;
         } else {
-            // 🔥 존재하지 않는 enemyId 정리
+            // 🔥 삭제된 상대 정리
             await myRef.update({ enemyId: null });
         }
     }
 
-
     /* =========================
-       3️⃣ 매칭 대상 탐색
+       3️⃣ 매칭 탐색
     ========================= */
     if (!enemySnap) {
         const myScore =
@@ -90,11 +62,10 @@ export default withApi("protected", async (req, res, { uid }) => {
                 .collection("characters")
                 .where("rankScore", ">=", myScore - range)
                 .where("rankScore", "<=", myScore + range)
+                .limit(20) // 🔥 과도한 read 방지
                 .get();
 
-            candidates = snap.docs.filter(d =>
-                d.id !== charId
-            );
+            candidates = snap.docs.filter(d => d.id !== charId);
 
             range += 100;
         }
@@ -118,34 +89,7 @@ export default withApi("protected", async (req, res, { uid }) => {
     const enemyChar = enemySnap.data();
 
     /* =========================
-       4️⃣ battle 세션 생성
-    ========================= */
-    const battleSession = {
-        myChar: {
-            id: mySnap.id,
-            ...myChar
-        },
-        enemyChar: {
-            id: enemySnap.id,
-            ...enemyChar
-        },
-        turn: 1,
-        log: [],
-        startedAt: Date.now()
-    };
-
-    await setBattleSession(uid, battleSession);
-
-    /* =========================
-       🔥 세션 전체 로그 출력
-    ========================= */
-    console.log("========== [BATTLE SESSION CREATED] ==========");
-    console.log("uid:", uid);
-    console.log(JSON.stringify(battleSession, null, 2));
-    console.log("==============================================");
-
-    /* =========================
-       5️⃣ 프론트 응답 (최소 정보)
+       4️⃣ 응답
     ========================= */
     return res.json({
         matched: true,

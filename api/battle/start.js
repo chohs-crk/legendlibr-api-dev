@@ -3,7 +3,7 @@ export const config = { runtime: "nodejs" };
 
 import { withApi } from "../_utils/withApi.js";
 import { db } from "../../firebaseAdmin.js";
-import { deleteBattleSession } from "../base/sessionstore.js";
+
 export default withApi("battle_start", async (req, res, { uid }) => {
     if (req.method !== "POST") {
         return res.status(405).json({ ok: false, error: "POST_ONLY" });
@@ -36,8 +36,16 @@ export default withApi("battle_start", async (req, res, { uid }) => {
         // 3) 상대 캐릭터 검증
         const enemySnap = await db.collection("characters").doc(enemyId).get();
         if (!enemySnap.exists) {
-            return res.status(404).json({ ok: false, error: "ENEMY_NOT_FOUND" });
+            await db.collection("characters").doc(myCharId).update({
+                enemyId: null
+            });
+
+            return res.status(409).json({
+                ok: false,
+                error: "ENEMY_DELETED"
+            });
         }
+
         const enemy = enemySnap.data();
 
         // 4) battle 문서 생성
@@ -59,9 +67,7 @@ export default withApi("battle_start", async (req, res, { uid }) => {
             enemyId: null
         });
 
-        // ⭐ Redis battle session 초기화 (기존 전투 세션 제거)
-        
-        await deleteBattleSession(uid);
+     
 
 
         return res.status(200).json({

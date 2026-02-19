@@ -7,6 +7,10 @@ export const redis = new Redis({
 
 const PREFIX = "flow:session:";
 
+/* ==================================================
+   일반 flow 세션 (다른 기능용)
+================================================== */
+
 export async function getSession(uid) {
     if (!uid) return null;
     return await redis.get(PREFIX + uid);
@@ -26,20 +30,4 @@ export async function patchSession(uid, partial, ttl = 600) {
 export async function deleteSession(uid) {
     if (!uid) return;
     await redis.del(PREFIX + uid);
-}
-const BATTLE_PREFIX = "battle:session:";
-
-export async function getBattleSession(uid) {
-    if (!uid) return null;
-    return await redis.get(BATTLE_PREFIX + uid);
-}
-
-export async function setBattleSession(uid, data, ttl = 600) {
-    if (!uid) return;
-    await redis.set(BATTLE_PREFIX + uid, data, { ex: ttl });
-}
-
-export async function deleteBattleSession(uid) {
-    if (!uid) return;
-    await redis.del(BATTLE_PREFIX + uid);
 }
