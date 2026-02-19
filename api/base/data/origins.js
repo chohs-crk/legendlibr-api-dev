@@ -1,4 +1,4 @@
-﻿// server/data/origins.js
+﻿// base/data/origins.js
 // ⚠️ 서버 전용 — 클라이언트 절대 노출 금지
 
 export const ORIGINS = {

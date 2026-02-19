@@ -2,6 +2,7 @@
 
 import { withApi } from "../_utils/withApi.js";
 import { db } from "../../firebaseAdmin.js";
+import { DEFAULT_REGIONS } from "./data/default-regions.js";
 
 export default withApi("protected", async (req, res, { uid }) => {
 
@@ -17,23 +18,18 @@ export default withApi("protected", async (req, res, { uid }) => {
     try {
 
         /* =====================================================
-           1️⃣ 기본(Default) Region
-        ===================================================== */
-        const baseSnap = await db.collection("regionsDefault")
-            .where("originId", "==", originId)
-            .get();
-
-        const baseRegions = baseSnap.docs.map(doc => {
-            const data = doc.data();
-
-            return {
-                id: doc.id,
-                name: data.name || "",
-                detail: data.detail || "",
-                originId: data.originId || "",
+         1️⃣ 기본(Default) Region (정적 파일 사용)
+      ===================================================== */
+        const baseRegions = DEFAULT_REGIONS
+            .filter(r => r.originId === originId)
+            .map(r => ({
+                id: r.id,
+                name: r.name || "",
+                detail: r.detail || "",
+                originId: r.originId || "",
                 source: "default"
-            };
-        });
+            }));
+
 
 
         /* =====================================================
