@@ -29,6 +29,7 @@ function toPublicCharacter(doc) {
         origin: d.origin || "",
         originDesc: d.originDesc || "",
         region: d.region || "",
+        regionId: d.regionId || "",
         regionDetail: d.regionDetail || "",
 
         promptRefined: d.promptRefined || "",
