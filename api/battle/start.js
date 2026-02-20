@@ -3,6 +3,7 @@ export const config = { runtime: "nodejs" };
 
 import { withApi } from "../_utils/withApi.js";
 import { db } from "../../firebaseAdmin.js";
+import { FieldValue } from "firebase-admin/firestore";
 
 export default withApi("battle_start", async (req, res, { uid }) => {
     if (req.method !== "POST") {
@@ -51,16 +52,24 @@ export default withApi("battle_start", async (req, res, { uid }) => {
         // 4) battle 문서 생성
         const battleRef = await db.collection("battles").add({
             userId: uid,
+
             myId: myCharId,
             enemyId,
+
             myName: my.displayRawName || "",
             enemyName: enemy.displayRawName || "",
+
+            // 🔥 이미지 저장 (추후 DB read 제거용)
+            myImage: my.image || null,
+            enemyImage: enemy.image || null,
+
             status: "queued",
             finished: false,
             eloApplied: false,
-            createdAt: new Date(),
+            createdAt: FieldValue.serverTimestamp(),
             logs: []
         });
+
 
         // ⭐ 매칭을 배틀 시작 직후 즉시 초기화
         await db.collection("characters").doc(myCharId).update({
