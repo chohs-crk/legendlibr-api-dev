@@ -309,7 +309,7 @@ ${prompt}
         let profile = "없음";
         try {
             const second = await requestGemini({
-                modelId: "gemini-3-flash",   // ✅ 변경
+                modelId: "gemini-flash-latest",   // ✅ 변경
                 systemPrompt: SYSTEM_PROMPT_STYLE,
                 userPrompt: stylePrompt,
                 temperature: 0.5,
@@ -329,7 +329,7 @@ ${prompt}
                     console.warn("[AI][PARSE_FAIL_RETRYING][STYLE]", { uid });
 
                     const retry2 = await requestGemini({
-                        modelId: "gemini-3-flash",   // ✅ 추가
+                        modelId: "gemini-flash-latest",   // ✅ 추가
                         systemPrompt: SYSTEM_PROMPT_STYLE,
                         userPrompt: stylePrompt,
                         temperature: 0.4,
