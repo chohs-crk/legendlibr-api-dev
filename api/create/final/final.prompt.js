@@ -1,4 +1,8 @@
-﻿import { SAFETY_RULES_AFTER } from "../base/safetyrules.js";
+﻿import { SAFETY_RULES_AFTER } from "../../base/safetyrules.js";
+
+// 이하 내용은 기존 final.prompt.js 그대로 유지
+// (SYSTEM_FOR_STATS, SYSTEM_FOR_FINAL, buildFinalEndingPrompt, buildFinalStatsPrompt ...)
+
 
 
 
