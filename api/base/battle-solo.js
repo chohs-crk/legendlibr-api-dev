@@ -174,8 +174,16 @@ export default withApi("protected", async (req, res) => {
 
         if (winnerId && loserId) {
 
+            const now = Date.now();
+            const finishedAtMs =
+                typeof b.finishedAt?.toMillis === "function"
+                    ? b.finishedAt.toMillis()
+                    : null;
+
+            const within2Min =
+                finishedAtMs && (now - finishedAtMs <= 120000);
+
             if (b.elo) {
-                // 🔥 이미 적용됨 → DB read 없음
                 if (winnerId === b.myId) {
                     myEloDelta = b.elo.winnerDelta;
                     enemyEloDelta = b.elo.loserDelta;
@@ -184,8 +192,8 @@ export default withApi("protected", async (req, res) => {
                     enemyEloDelta = b.elo.winnerDelta;
                 }
 
-            } else {
-                // 🔥 아직 적용 안 됨 → 이때만 read
+            } else if (within2Min) {
+
                 let myRank = 1000;
                 let enemyRank = 1000;
 
@@ -211,6 +219,10 @@ export default withApi("protected", async (req, res) => {
                     myEloDelta = -lose;
                     enemyEloDelta = win;
                 }
+
+            } else {
+                myEloDelta = null;
+                enemyEloDelta = null;
             }
         }
 

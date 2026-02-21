@@ -139,8 +139,17 @@ export default withApi("protected", async (req, res, { uid }) => {
 
                 if (winnerId && loserId) {
 
+                    const now = Date.now();
+                    const finishedAtMs =
+                        typeof b.finishedAt?.toMillis === "function"
+                            ? b.finishedAt.toMillis()
+                            : null;
+
+                    const within2Min =
+                        finishedAtMs && (now - finishedAtMs <= 120000);
+
                     if (b.elo) {
-                        // 🔥 ELO 이미 적용됨 → DB read 없음
+                        // ✅ 정식 elo 존재 → 항상 사용
                         if (winnerId === b.myId) {
                             myEloDelta = b.elo.winnerDelta;
                             enemyEloDelta = b.elo.loserDelta;
@@ -149,8 +158,8 @@ export default withApi("protected", async (req, res, { uid }) => {
                             enemyEloDelta = b.elo.winnerDelta;
                         }
 
-                    } else {
-                        // 🔥 ELO 아직 → 이때만 캐릭터 DB 읽음
+                    } else if (within2Min) {
+                        // ✅ 2분 이내만 추정치 허용
 
                         let myRank = 1000;
                         let enemyRank = 1000;
@@ -177,6 +186,11 @@ export default withApi("protected", async (req, res, { uid }) => {
                             myEloDelta = -lose;
                             enemyEloDelta = win;
                         }
+
+                    } else {
+                        // ❌ 2분 초과 → 아예 내려주지 않음
+                        myEloDelta = null;
+                        enemyEloDelta = null;
                     }
                 }
 
