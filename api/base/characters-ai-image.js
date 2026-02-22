@@ -35,27 +35,28 @@ const IMAGE_MODEL_MAP = {
 
     gemini: {
         provider: "gemini",
-        costFrames: 40   // 🔥 40원
+        costFrames: 50
     },
 
-    together_qwen: {
+    together_flux1_schnell: {
         provider: "together",
-        model: "Qwen/Qwen-Image",
-        costFrames: 5,   // 🔥 5원
-        supportsNegativePrompt: false
+        model: "black-forest-labs/FLUX.1-schnell",
+        costFrames: 10,
+        supportsNegativePrompt: false,
+        steps: 4
     },
 
     together_flux2: {
         provider: "together",
         model: "black-forest-labs/FLUX.2-dev",
-        costFrames: 20,  // 🔥 20원
+        costFrames: 25,
         supportsNegativePrompt: false,
-        steps: 20
+        steps: 28
     }
 };
 
 // 캐릭터 이미지 생성 기본 사이즈(세로 인물에 유리)
-const DEFAULT_WIDTH = 768;
+const DEFAULT_WIDTH = 1024;
 const DEFAULT_HEIGHT = 1024;
 
 /* =========================
@@ -63,38 +64,36 @@ const DEFAULT_HEIGHT = 1024;
 ========================= */
 async function buildImagePromptAndScore(input) {
     const systemPrompt = `
-너는 RPG 게임용 캐릭터 일러스트를 설계하는 이미지 프롬프트 전문가다.
-너의 목적은 "캐릭터가 화면의 주인공으로 강하게 인식되는 이미지"를 만들기 위한
-프롬프트를 생성하는 것이다.
+You are a professional image prompt engineer for RPG character illustrations.
+
+Your goal is to design prompts where the CHARACTER is visually dominant and clearly the protagonist.
 
 ${SAFETY_RULES}
 
-[역할]
-- 캐릭터는 항상 장면의 중심이며, 배경보다 시각적으로 우선되어야 한다.
-- 배경은 캐릭터의 정체성을 보조하는 장치일 뿐, 주제가 아니다.
+[Role]
+- The character must always be the visual focus.
+- The background must support the character but never overpower it.
 
-[해야 할 일]
-1. 캐릭터 이미지 프롬프트 생성
-   - 외형(체형, 복장, 장비, 자세, 표정)을 명확히 묘사
-   - "단독 인물", "주인공", "영웅적 구도"를 기본 전제로 한다
-   - 전신 또는 반신 기준, 카메라는 정면 또는 약간 아래에서 바라본 시점
+[Tasks]
+1. Generate a CHARACTER prompt
+   - Clearly describe appearance, outfit, pose, facial expression
+   - Assume single character, heroic framing
+   - Camera angle slightly low or frontal
 
-2. 배경 이미지 프롬프트 생성
-   - 장소의 분위기와 상징만 전달
-   - 배경은 흐릿하거나 간결해야 하며, 캐릭터보다 눈에 띄면 안 된다
-   - 복잡한 군중, 다수 인물, 과도한 오브젝트는 피한다
+2. Generate a BACKGROUND prompt
+   - Atmospheric and minimal
+   - No crowd, no multiple subjects
+   - Slight blur to keep character dominant
 
-3. 점수 평가
-   - fitScore: 유저 입력이 캐릭터 설정과 얼마나 잘 어울리는지 (1~100)
-   - safetyScore: 안전 규칙 위반 가능성 (0~100)
+3. Score evaluation
+   - fitScore: 1~100
+   - safetyScore: 0~100
 
-[강제 규칙]
-- 캐릭터 프롬프트와 배경 프롬프트는 반드시 분리
-- 캐릭터 > 배경 순서의 시각적 우선순위를 항상 유지
-- 선정성, 잔혹성, 현실 정치·종교는 제거하거나 상징화
+[Strict Rules]
+- Output MUST be English
+- Character prompt and background prompt must be separated
+- JSON only
 
-[출력 형식]
-JSON만 출력한다.
 {
   "characterPrompt": "...",
   "backgroundPrompt": "...",
@@ -288,6 +287,7 @@ export default withApi("expensive", async (req, res, { uid }) => {
     let background = result.backgroundPrompt;
     if (data.regionId?.endsWith("_DEFAULT")) {
         background = ORIGINS[data.originId]?.background || background;
+        background = background + ", background only, no main character, depth of field blur";
     }
 
     const finalPrompt = `

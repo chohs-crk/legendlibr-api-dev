@@ -35,7 +35,7 @@ function toPublicCharacter(doc) {
         promptRefined: d.promptRefined || "",
         fullStory: d.fullStory || "",
 
-        battleScore: d.battleScore || 0,
+        battleScore: d.rankScore  || 0,
         battleCount: d.battleCount || 0,
 
         skills: (d.skills || []).map(s => ({

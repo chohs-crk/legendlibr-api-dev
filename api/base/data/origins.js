@@ -16,9 +16,7 @@ export const ORIGINS = {
     `.trim(),
 
         background:
-            "높은 성벽으로 둘러싸인 중세 도시가 붉은 노을 아래 놓여 있다. " +
-            "도시 곳곳에서 대장간의 불꽃이 튀고, 검은 연기와 쇠 냄새가 공기를 채운다. " +
-            "좁은 돌길 사이로 기사와 용병이 오가며, 성채 위에는 오래된 깃발이 바람에 흔들린다.",
+            "A medieval walled city under a red sunset, distant blacksmith sparks glowing in the air, narrow stone streets, faint smoke drifting upward, slightly blurred background, cinematic lighting, no crowd",
 
         narrationGuide: {
             tone: "차갑고 무거우며 현실적인 중세 서사",
@@ -43,9 +41,7 @@ export const ORIGINS = {
     `.trim(),
 
         background:
-            "안개가 깔린 산맥과 강이 이어지는 광활한 중원. " +
-            "대숲 사이로 고대 사원이 숨어 있고, 산길에는 무림인의 발자국이 남아 있다. " +
-            "낡은 객잔과 절벽 위 정자가 고요히 서 있으며, 공기에는 긴장과 살기가 흐른다.",
+            "Misty mountain ranges and rivers stretching across ancient martial lands, bamboo forests surrounding hidden temples, distant inns along mountain paths, soft fog atmosphere, minimal background detail, slightly blurred",
 
         narrationGuide: {
             tone: "건조한 긴장과 여운이 남는 무림 서사",
@@ -70,9 +66,7 @@ export const ORIGINS = {
     `.trim(),
 
         background:
-            "하늘 위에 떠 있는 백색의 도시와 빛나는 궁전. " +
-            "황금빛 기둥과 수정으로 이루어진 건축물이 구름 사이로 이어진다. " +
-            "부드러운 빛이 모든 것을 감싸며, 공기는 맑고 고요하지만 엄숙한 긴장감이 흐른다.",
+            "Floating white celestial city above the clouds, golden pillars and crystal architecture glowing softly, radiant divine light, serene and clean atmosphere, background slightly diffused, no figures",
 
         narrationGuide: {
             tone: "정제되고 장엄하며 엄숙한 성역 서사",
@@ -97,9 +91,7 @@ export const ORIGINS = {
     `.trim(),
 
         background:
-            "불타는 대지 위에 세워진 거대한 흑요석 도시. " +
-            "용암 강이 도시를 가로지르고, 붉은 하늘 아래 첨탑들이 솟아 있다. " +
-            "공기에는 유황 냄새와 속삭이는 음성이 가득하며, 불길한 빛이 모든 것을 비춘다.",
+            "A dark obsidian city built over molten lava rivers, towering spires under a crimson sky, faint sulfur mist in the air, ominous glow reflecting from the ground, atmospheric depth, blurred distant structures",
 
         narrationGuide: {
             tone: "음울하고 냉소적이며 거래의 냄새가 짙은 서사",
@@ -124,9 +116,7 @@ export const ORIGINS = {
     `.trim(),
 
         background:
-            "네온사인이 빛나는 거대한 미래 도시의 밤 풍경. " +
-            "고층 빌딩 사이로 홀로그램 광고가 떠다니고, 하늘에는 드론이 순찰한다. " +
-            "비에 젖은 거리에는 전선과 네온 불빛이 반사되어 사이버펑크 특유의 혼란을 만든다.",
+            "Neon-lit futuristic megacity at night, holographic signs flickering between skyscrapers, wet reflective asphalt streets, drones faintly visible in the distance, cyberpunk ambience, background depth blur",
 
         narrationGuide: {
             tone: "건조하고 빠르며 차가운 도시 감각이 도는 미래 서사",
@@ -151,9 +141,7 @@ export const ORIGINS = {
     `.trim(),
 
         background:
-            "거대한 고목들이 하늘을 가릴 정도로 우거진 밀림. " +
-            "나무 위에는 엘프의 건축물이 자연스럽게 얽혀 있고, " +
-            "빛나는 마법 문양과 반딧불 같은 빛이 숲속을 은은하게 비춘다.",
+            "Ancient forest with towering trees blocking most sunlight, soft glowing magical symbols carved into bark, floating light particles in the air, tranquil and mystical atmosphere, subtle background blur",
 
         narrationGuide: {
             tone: "부드럽고 고요하지만 날카로운 균형 의식이 깔린 서사",
@@ -178,9 +166,7 @@ export const ORIGINS = {
     `.trim(),
 
         background:
-            "거대한 화산 내부에 건설된 석조 도시. " +
-            "용암이 흐르는 통로와 금속 다리가 도시를 연결하고, " +
-            "붉은 불빛과 불꽃이 드워프들의 대장간을 밝히며 심부를 울린다.",
+            "A volcanic underground forge city, flowing lava channels illuminating stone bridges, glowing furnaces in the distance, red-orange ambient light, heavy stone structures fading into shadow, atmospheric depth",
 
         narrationGuide: {
             tone: "거칠고 단단하며 열기와 쇳소리가 섞인 공방 서사",
