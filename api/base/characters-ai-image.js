@@ -40,11 +40,11 @@ export default withApi("expensive", async (req, res, { uid }) => {
     }
 
     const userPrompt = (prompt ?? "").toString().trim();
-    if (userPrompt.length < 30 || userPrompt.length > 200) {
+    if (userPrompt.length < 20 || userPrompt.length > 1000) {
         return res.status(400).json({
             ok: false,
             error: "INVALID_PROMPT_LENGTH",
-            message: "prompt는 30~200자로 제한"
+            message: "prompt는 20~1000자로 제한"
         });
     }
 
