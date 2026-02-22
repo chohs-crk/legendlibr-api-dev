@@ -91,13 +91,16 @@ export default withApi("expensive", async (req, res, { uid }) => {
         `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${downloadToken}`;
 
     const now = Date.now();
+    const ALLOWED_STYLE_KEYS = new Set(["anime2d", "real3d", "watercolor", "darkfantasy", "pixel"]);
 
+    const rawStyle = (style ?? "").toString().trim();
+    const normalizedStyle = ALLOWED_STYLE_KEYS.has(rawStyle) ? rawStyle : null;
     // 4) Firestore에 큐 등록
     await jobRef.set({
         uid,
         charId: id,
         userPrompt,
-        style: style || null,
+        style: normalizedStyle,
         modelKey: normalizedKey,
 
         status: "queued",
