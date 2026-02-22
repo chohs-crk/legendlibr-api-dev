@@ -48,7 +48,7 @@ const IMAGE_MODEL_MAP = {
 
     together_flux2: {
         provider: "together",
-        model: "black-forest-labs/FLUX.2-dev",
+        model: "black-forest-labs/FLUX.1-dev",
         costFrames: 25,
         supportsNegativePrompt: false,
         steps: 28
