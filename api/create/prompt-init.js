@@ -22,6 +22,24 @@ export default withApi("expensive", async (req, res, { uid }) => {
         return res.status(405).json({ ok: false, error: "POST_ONLY" });
     }
 
+    /* ===============================
+       🔒 입력값 파싱 + 길이 상수
+    =============================== */
+    const NAME_MIN = 1;
+    const NAME_MAX = 15;
+    const PROMPT_MIN_BYTES = 20;
+    const PROMPT_MAX_BYTES = 1000;
+
+    const body = req.body || {};
+    const originId = typeof body.originId === "string" ? body.originId : "";
+    const regionId = typeof body.regionId === "string" ? body.regionId : "";
+    const name = typeof body.displayNameRaw === "string" ? body.displayNameRaw.trim() : "";
+    const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
+
+    if (!originId || !regionId) {
+        return res.status(400).json({ ok: false, error: "MISSING_PARAMS" });
+    }
+
 
     // === 0. 기존 세션 존재 여부 확인 ===
     const existing = await getSession(uid);
@@ -56,9 +74,33 @@ export default withApi("expensive", async (req, res, { uid }) => {
     }
 
 
-    // === 1. 입력값 파싱 ===
-    const { originId, regionId, displayNameRaw: name, prompt } = req.body;
-    console.log("[prompt-init] parsed:", { originId, regionId, name, prompt });
+    /* ===============================
+       🔒 입력값 길이 검증 (서버에서 최종 보증)
+
+       - 이름: 1~15글자(문자 기준)
+       - 프롬프트: 20~1000byte(UTF-8 기준)
+
+       ※ 프론트에서 이미 막더라도, 서버에서 반드시 재검증해야
+          우회 요청/버그/클라이언트 수정 등에 안전합니다.
+    =============================== */
+    const nameLen = Array.from(name).length;
+    if (nameLen < NAME_MIN || nameLen > NAME_MAX) {
+        return res.status(400).json({ ok: false, error: "INVALID_NAME_LENGTH" });
+    }
+
+    const promptBytes = Buffer.byteLength(prompt, "utf8");
+    if (promptBytes < PROMPT_MIN_BYTES || promptBytes > PROMPT_MAX_BYTES) {
+        return res.status(400).json({ ok: false, error: "INVALID_PROMPT_BYTE_LENGTH" });
+    }
+
+
+    // === 1. 입력값 로그 (검증된 값만) ===
+    console.log("[prompt-init] parsed:", {
+        originId,
+        regionId,
+        name,
+        promptBytes
+    });
 
 
 
@@ -158,7 +200,7 @@ export default withApi("expensive", async (req, res, { uid }) => {
         nowFlow: {
             refine: true,
             story1: false,
-          
+
             story3: false,
             final: false
         },
