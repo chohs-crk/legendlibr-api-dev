@@ -94,17 +94,19 @@ export default withApi("expensive", async (req, res, { uid }) => {
     const now = Date.now();
     function normalizeStyleKey(v) {
         const raw = typeof v === "string" ? v.trim() : "";
+
+        // 빈 값 → null
         if (!raw) return null;
 
         const compact = raw.toLowerCase().replace(/\s+/g, "");
 
+        // 설정 안함 계열
         if (
             compact === "none" ||
             compact === "off" ||
             compact === "unset" ||
             compact === "nostyle" ||
             compact === "no_style" ||
-            compact === "default" ||
             compact === "없음" ||
             compact === "미설정" ||
             compact === "설정안함"
@@ -113,11 +115,29 @@ export default withApi("expensive", async (req, res, { uid }) => {
         }
 
         const s = raw.toLowerCase();
-        const allowed = new Set(["anime2d", "real3d", "watercolor", "darkfantasy", "pixel"]);
+
+        // 🔥 새 스타일 체계
+        const allowed = new Set([
+            "default",       // 기본
+            "darkfantasy",   // 다크 판타지
+            "pastel",        // 파스텔 풍
+            "cyberpunk",     // 사이버펑크
+            "anime"          // 일본 애니
+        ]);
+
         return allowed.has(s) ? s : null;
     }
 
     const normalizedStyle = normalizeStyleKey(style);
+
+    // ❗ Gemini가 아닌데 스타일이 null이면 에러
+    if (normalizedKey !== "gemini" && !normalizedStyle) {
+        return res.status(400).json({
+            ok: false,
+            error: "STYLE_REQUIRED",
+            message: "이 모델은 스타일 지정이 필요합니다."
+        });
+    }
     // 4) Firestore에 큐 등록
     await jobRef.set({
         uid,
