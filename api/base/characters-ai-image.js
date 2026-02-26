@@ -13,14 +13,15 @@ const IMAGE_MODEL_MAP = {
         model: "gemini-2.5-flash-image",
         costFrames: 50
     },
-    together_flux1_schnell: {
+    together_sdxl: { // 🔥 키 변경
         provider: "together",
-        model: "black-forest-labs/FLUX.1-schnell",
+        model: "stabilityai/stable-diffusion-xl-base-1.0",
         costFrames: 10
     },
     together_flux2: {
         provider: "together",
-        model: "black-forest-labs/FLUX.1-dev",
+        // ✅ 교체: Flux 1 dev → Flux 2 dev
+        model: "black-forest-labs/FLUX.2-dev",
         costFrames: 25
     }
 };
@@ -91,10 +92,32 @@ export default withApi("expensive", async (req, res, { uid }) => {
         `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${downloadToken}`;
 
     const now = Date.now();
-    const ALLOWED_STYLE_KEYS = new Set(["anime2d", "real3d", "watercolor", "darkfantasy", "pixel"]);
+    function normalizeStyleKey(v) {
+        const raw = typeof v === "string" ? v.trim() : "";
+        if (!raw) return null;
 
-    const rawStyle = (style ?? "").toString().trim();
-    const normalizedStyle = ALLOWED_STYLE_KEYS.has(rawStyle) ? rawStyle : null;
+        const compact = raw.toLowerCase().replace(/\s+/g, "");
+
+        if (
+            compact === "none" ||
+            compact === "off" ||
+            compact === "unset" ||
+            compact === "nostyle" ||
+            compact === "no_style" ||
+            compact === "default" ||
+            compact === "없음" ||
+            compact === "미설정" ||
+            compact === "설정안함"
+        ) {
+            return null;
+        }
+
+        const s = raw.toLowerCase();
+        const allowed = new Set(["anime2d", "real3d", "watercolor", "darkfantasy", "pixel"]);
+        return allowed.has(s) ? s : null;
+    }
+
+    const normalizedStyle = normalizeStyleKey(style);
     // 4) Firestore에 큐 등록
     await jobRef.set({
         uid,

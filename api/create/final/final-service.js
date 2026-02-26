@@ -1,6 +1,6 @@
 ﻿import { withApi } from "../../_utils/withApi.js";
 import { getSession, setSession, deleteSession } from "../../base/sessionstore.js";
-
+//💡
 import { CHAR_LIMIT, getUserCharCount, saveFinalCharacterTx } from "./final-repository.js";
 import {
     calculateStoryScore,
@@ -67,26 +67,46 @@ export default withApi("expensive", async (req, res, { uid }) => {
         const endingType = decideEndingType(storyScore);
 
         // 2) AI #1 엔딩/특징
-        const { ending, features } = await generateEndingAndFeatures({
+        const endingResult = await generateEndingAndFeatures({
             uid,
             input,
             output,
             selected,
             endingType
         });
+        if (!s.aiUsage) s.aiUsage = { calls: [] };
 
+       
+        const ending = endingResult.ending;
+        const features = endingResult.features;
+        const endingUsage = endingResult.usage;
         // 3) fullStory 조립 + 포맷
         const fullStory = buildFullStory(output, ending);
         const formattedStory = formatFinalStory(fullStory);
 
         // 4) AI #2 스탯/스킬
-        const stats = await generateStats({
+        const statsResult = await generateStats({
             uid,
             input,
             output,
             fullStory
         });
+        const stats = statsResult.stats;
+        const statsUsage = statsResult.usage;
+        function pushFinalUsage(call, stageTag) {
+            s.aiUsage.calls.push({
+                stage: "final",
+                tag: stageTag,
+                modelId: call?.modelId,
+                promptTokens: call?.usageMetadata?.promptTokenCount ?? null,
+                outputTokens: call?.usageMetadata?.candidatesTokenCount ?? null,
+                totalTokens: call?.usageMetadata?.totalTokenCount ?? null,
+                ts: Date.now()
+            });
+        }
 
+        pushFinalUsage(endingUsage, "FINAL_ENDING");
+        pushFinalUsage(statsUsage, "FINAL_STATS");
         // 5) DB 저장 (트랜잭션)
         const id = await saveFinalCharacterTx({
             uid,
@@ -96,7 +116,8 @@ export default withApi("expensive", async (req, res, { uid }) => {
             features,
             storyScore,
             stats,
-            metaSafety: s.metaSafety
+            metaSafety: s.metaSafety,
+            aiUsage: s.aiUsage?.calls || []
         });
 
         // 6) 세션 정리 + 응답

@@ -1,5 +1,5 @@
-import { db } from "../../../firebaseAdmin.js";
-
+Ôªøimport { db } from "../../../firebaseAdmin.js";
+//üí°
 export const CHAR_LIMIT = 10;
 
 function makeError(code, status = 500, meta) {
@@ -24,13 +24,14 @@ export async function saveFinalCharacterTx({
     features,
     storyScore,
     stats,
-    metaSafety
+    metaSafety,
+     aiUsage   // üî• Ï∂îÍ∞Ä
 }) {
     const ref = db.collection("characters").doc();
     const userRef = db.collection("users").doc(uid);
 
     await db.runTransaction(async tx => {
-        // 1) USER READ (µøΩ√º∫ πÊæÓ)
+        // 1) USER READ (ÎèôÏãúÏÑ± Î∞©Ïñ¥)
         const userSnap = await tx.get(userRef);
         const currentCount = userSnap.exists ? userSnap.data().charCount || 0 : 0;
 
@@ -38,7 +39,7 @@ export async function saveFinalCharacterTx({
             throw makeError("CHARACTER_LIMIT_REACHED", 403);
         }
 
-        // 2) REGION READ (º±≈√)
+        // 2) REGION READ (ÏÑ†ÌÉù)
         const regionId = input.region?.id;
         let regionRef = null;
         let regionData = null;
@@ -52,7 +53,7 @@ export async function saveFinalCharacterTx({
             }
             regionData = regionSnap.data() || {};
 
-            // ±««— ∞À¡ı
+            // Í∂åÌïú Í≤ÄÏ¶ù
             const myRegionRef = db.collection("users").doc(uid).collection("myregion").doc(regionId);
             const myRegionSnap = await tx.get(myRegionRef);
 
@@ -101,6 +102,7 @@ export async function saveFinalCharacterTx({
 
             rankScore: 1000,
             battleCount: 0,
+            aiUsage: aiUsage || null,
             createdAt: new Date()
         });
 

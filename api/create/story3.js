@@ -1,17 +1,15 @@
 ﻿export const config = {
     runtime: "nodejs",
-    compute: 1
+    compute: 1,
 };
 
-import { getSession, setSession } from "../base/sessionstore.js";
-import { callStoryAIStream } from "./callStoryAI.js";
+import { getSession, setSession, deleteSession } from "../base/sessionstore.js";
+import { callStorySceneWithRetry } from "./callStoryAI.js";
 import { withApi } from "../_utils/withApi.js";
-
 
 /* ================================
    SCENE ROLE SYSTEM - STORY3
 ================================ */
-
 const STORY3_SYSTEM = `
 [장면 역할 – 전 / 전환점]
 
@@ -23,9 +21,7 @@ const STORY3_SYSTEM = `
 선택지를 그대로 반복하지 말고,
 그 행동을 바탕으로 실제로 벌어지는 장면을 묘사하라.
 
-예시: 선택지가 공격한다 라면 캐릭터가 상대의 복부를 가격했다. 이런 식으로 서술하고 이후 내용을 이어감
 반드시:
-
 1. 이전 장면 직후 시점
 2. 선택지 행동의 구체적 실행 장면
 3. 상황의 확대 또는 충돌
@@ -35,65 +31,50 @@ const STORY3_SYSTEM = `
 결말 서술 금지.
 요약 금지.
 교훈 금지.
+
+[선택지의 기능]
+선택지는 "다음 장면의 실제 시작점"이다.
+선택지의 행동이 이미 실행된 상태로 장면을 시작해야 한다.
+선택지를 그대로 다시 쓰지 말고 실행 장면을 구체적으로 묘사하라.
 `;
 
-
 /* ================================
-   PARSE
+   AI USAGE LOGGER
 ================================ */
+function pushUsageCall(session, call) {
+    if (!session.aiUsage) {
+        session.aiUsage = { calls: [] };
+    }
 
-function parseStory(text) {
-    const storyMatch = text.match(/<STORY>([\s\S]*?)<\/STORY>/);
-    const story = storyMatch ? storyMatch[1].trim() : "";
+    session.aiUsage.calls.push({
+        stage: call.stage,
+        tag: call.tag,
+        modelId: call.modelId || "unknown",
 
-    const choiceMatch =
-        text.match(/<CHOICES>([\s\S]*?)<\/CHOICES>/) ||
-        text.match(/<CHOICES>([\s\S]*)$/);
+        promptTokens: call.usageMetadata?.promptTokenCount ?? null,
+        outputTokens: call.usageMetadata?.candidatesTokenCount ?? null,
+        totalTokens:
+            call.usageMetadata?.totalTokenCount ??
+            ((call.usageMetadata?.promptTokenCount ?? 0) +
+                (call.usageMetadata?.candidatesTokenCount ?? 0)) ??
+            null,
 
-    const rawChoices = choiceMatch
-        ? choiceMatch[1]
-            .trim()
-            .split("\n")
-            .map(l => l.trim())
-            .filter(Boolean)
-        : [];
-
-    const choices = rawChoices.map(c => {
-        const m = c.match(/^(.*)\s+#(\d+)$/);
-        return {
-            text: m ? m[1].trim() : c.trim(),
-            rawScore: m ? parseInt(m[2]) : 0
-        };
+        ts: Date.now(),
     });
-
-    return { story, choices };
 }
-
 
 /* ================================
    BUILD PROMPT
 ================================ */
-
 function buildPrompt(s) {
-
     const origin = s.input.origin;
     const region = s.input.region;
 
-    const {
-        name,
-        intro,
-        existence,
-        canSpeak,
-        speechStyle,
-        narrationStyle,
-        theme,
-        profile
-    } = s.output;
+    const { intro, speechStyle, narrationStyle, theme, profile } = s.output;
 
     const prevStory = s.output.story1?.story || "";
     const selectedIndex = s.selected?.story1;
-    const selectedChoice =
-        s.output.story1?.choices?.[selectedIndex]?.text || "";
+    const selectedChoice = s.output.story1?.choices?.[selectedIndex]?.text || "";
 
     return `
 [이전 장면]
@@ -123,147 +104,93 @@ ${profile}
 
 [주제]
 ${theme}
-`;
+  `.trim();
 }
 
+/* ================================
+   SSE UTIL
+================================ */
+function escapeSSEData(text) {
+    return String(text || "")
+        .replace(/\r?\n/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
 
 /* ================================
    STREAM
 ================================ */
-
 async function stream(uid, s, res) {
-
     res.writeHead(200, {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
-        "Connection": "keep-alive"
+        Connection: "keep-alive",
     });
 
-    let attempt = 0;
-    const MAX_RETRY = 2;
+    try {
+        // ✅ 세션 상태: 호출 시작
+        s.called = true;
+        s.resed = false;
+        s.lastCall = Date.now();
+        await setSession(uid, s);
 
-    let full = "";
-    let sentenceBuffer = "";
-    let inStory = false;
+        const prompt = buildPrompt(s);
 
-    const prompt = buildPrompt(s);
+        const result = await callStorySceneWithRetry(uid, prompt, STORY3_SYSTEM, {
+            modelId: "gemini-2.5-flash",
+            temperature: 0.35,
+            topP: 0.8,
+            maxOutputTokens: 1024,
+            maxRetry: 3,
+        });
 
-    while (attempt < MAX_RETRY) {
-        full = "";
-        sentenceBuffer = "";
-        inStory = false;
+        const scene = result.scene;
 
-        try {
+        pushUsageCall(s, {
+            stage: "story3",
+            tag: "STORY3_JSON_SCHEMA",
+            modelId: result.modelId,
+            usageMetadata: result.usageMetadata,
+        });
 
-            s.called = true;
-            s.resed = false;
-            s.lastCall = Date.now();
-            await setSession(uid, s);
+        // ✅ 서버 저장 (score 포함, 클라이언트 전송 X)
+        s.output.story3 = {
+            story: scene.story,
+            choices: scene.choices.map((c) => ({
+                text: c.text,
+                score: c.score,
+            })),
+        };
 
-            await callStoryAIStream(
-                uid,
-                delta => {
+        s.resed = true;
+        await setSession(uid, s);
 
-                    if (typeof delta === "string") {
-                        delta = delta.replace(/#\d+/g, "");
-                    }
+        // ✅ 스토리 전송
+        res.write(`data: ${escapeSSEData(scene.story)}\n\n`);
 
-                    full += delta;
+        // ✅ 선택지 전송 (text만)
+        res.write(
+            `event: choices\ndata: ${JSON.stringify({
+                choices: scene.choices.map((c) => c.text),
+            })}\n\n`
+        );
 
-                    if (!inStory) {
-                        const idx = full.indexOf("<STORY>");
-                        if (idx !== -1) {
-                            inStory = true;
-                            sentenceBuffer = full.substring(idx + 7);
-                        }
-                        return;
-                    }
-
-                    sentenceBuffer += delta;
-
-                    const m = sentenceBuffer.match(/^([\s\S]*?[.!?])\s+/);
-                    if (m) {
-                        const sentence = m[1];
-                        res.write(`data: ${sentence}\n\n`);
-                        sentenceBuffer = sentenceBuffer.slice(m[0].length);
-                    }
-                },
-                prompt,
-                STORY3_SYSTEM
-            );
-
-            break;
-
-        } catch (err) {
-
-            attempt++;
-
-            if (attempt >= MAX_RETRY) {
-
-                console.error("[STORY3][STREAM_FAIL_FINAL]", { uid });
-
-                await deleteSession(uid);
-
-                res.write(`event: error\ndata: STREAM_FAILED\n\n`);
-                return res.end();
-            }
-
-            console.warn("[STORY3][RETRY]", { uid, attempt });
-        }
-    }
-
-    /* ===============================
-       🔥 포맷 검증
-    =============================== */
-
-    const parsed = parseStory(full);
-
-    if (!parsed.story || parsed.choices.length !== 3) {
-
-        console.error("[STORY3][INVALID_FORMAT]", { uid });
+        res.write(`event: done\ndata: end\n\n`);
+        res.end();
+    } catch (err) {
+        console.error("[STORY3][FAIL_FINAL]", { uid, err: err?.message });
 
         await deleteSession(uid);
 
-        res.write(`event: error\ndata: INVALID_FORMAT\n\n`);
-        return res.end();
+        res.write(`event: error\ndata: STREAM_FAILED\n\n`);
+        res.end();
     }
-
-    /* ===============================
-       정상 처리
-    =============================== */
-
-    res.write(`event: choices\ndata: ${JSON.stringify({
-        choices: parsed.choices.map(c => c.text)
-    })}\n\n`);
-
-    const sorted = [...parsed.choices].sort((a, b) => b.rawScore - a.rawScore);
-    if (sorted[0]) sorted[0].score = 3;
-    if (sorted[1]) sorted[1].score = 2;
-    if (sorted[2]) sorted[2].score = 1;
-
-    s.output.story3 = {
-        story: parsed.story,
-        choices: parsed.choices.map(c => ({
-            text: c.text,
-            score: sorted.find(x => x.text === c.text)?.score || 0
-        }))
-    };
-
-    s.resed = true;
-    await setSession(uid, s);
-
-    res.write(`event: done\ndata: end\n\n`);
-    res.end();
 }
-
-
 
 /* ================================
    HANDLER
 ================================ */
-
 export default withApi("expensive", async (req, res, { uid }) => {
-
     const s = await getSession(uid);
     if (!s || !s.nowFlow.story3) {
         return res.status(400).json({ ok: false });
@@ -272,11 +199,14 @@ export default withApi("expensive", async (req, res, { uid }) => {
     if (req.method === "PUT") {
         s.selected = s.selected || {};
         s.selected.story3 = req.body.index;
+
         s.nowFlow.story3 = false;
         s.nowFlow.final = true;
+
         s.called = false;
         s.resed = false;
         s.lastCall = 0;
+
         await setSession(uid, s);
         return res.json({ ok: true });
     }

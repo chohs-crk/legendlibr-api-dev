@@ -54,7 +54,35 @@ function safeParseJSON(text) {
         return null;
     }
 }
+/* =========================
+   AI USAGE LOGGER
+========================= */
+function pushUsageCall(session, call) {
+    if (!session.aiUsage) {
+        session.aiUsage = { calls: [] };
+    }
 
+    session.aiUsage.calls.push({
+        stage: call.stage,
+        tag: call.tag,
+        modelId: call.modelId || "unknown",
+
+        promptTokens:
+            call.usageMetadata?.promptTokenCount ?? null,
+
+        outputTokens:
+            call.usageMetadata?.candidatesTokenCount ?? null,
+
+        totalTokens:
+            call.usageMetadata?.totalTokenCount ??
+            (
+                (call.usageMetadata?.promptTokenCount ?? 0) +
+                (call.usageMetadata?.candidatesTokenCount ?? 0)
+            ) ?? null,
+
+        ts: Date.now()
+    });
+}
 function isBadExampleValue(s) {
     const t = safeStr(s);
     if (!t) return true;
@@ -143,7 +171,8 @@ async function requestGemini({
         raw: text || null
     });
 
-    return { text, data };
+    const usageMetadata = data?.usageMetadata || null;
+    return { text, data, usageMetadata, modelId: MODEL_ID };
 }
 
 
@@ -225,7 +254,12 @@ ${prompt}
             uid,
             tag: "PROFILE_1"
         });
-
+        pushUsageCall(s, {
+            stage: "refine",
+            tag: "PROFILE_1",
+            modelId: first.modelId,
+            usageMetadata: first.usageMetadata
+        });
 
         if (!first.text) {
             console.warn("[AI][EMPTY RESPONSE][PROFILE]", { uid });
@@ -247,7 +281,12 @@ ${prompt}
                 uid,
                 tag: "PROFILE_1_RETRY"
             });
-
+            pushUsageCall(s, {
+                stage: "refine",
+                tag: "PROFILE_1_RETRY",
+                modelId: retry.modelId,
+                usageMetadata: retry.usageMetadata
+            });
 
             parsedProfile = safeParseJSON(retry.text || "");
 
@@ -313,11 +352,16 @@ ${prompt}
                 systemPrompt: SYSTEM_PROMPT_STYLE,
                 userPrompt: stylePrompt,
                 temperature: 0.5,
-                maxTokens: 2048,
+                maxTokens: 4096,
                 uid,
                 tag: "STYLE_2"
             });
-
+            pushUsageCall(s, {
+                stage: "refine",
+                tag: "STYLE_2",
+                modelId: second.modelId,
+                usageMetadata: second.usageMetadata
+            });
 
 
             if (!second.text) {
@@ -333,11 +377,16 @@ ${prompt}
                         systemPrompt: SYSTEM_PROMPT_STYLE,
                         userPrompt: stylePrompt,
                         temperature: 0.4,
-                        maxTokens: 1024,
+                        maxTokens: 4096,
                         uid,
                         tag: "STYLE_2_RETRY"
                     });
-
+                    pushUsageCall(s, {
+                        stage: "refine",
+                        tag: "STYLE_2_RETRY",
+                        modelId: retry2.modelId,
+                        usageMetadata: retry2.usageMetadata
+                    });
 
                     parsedStyle = safeParseJSON(retry2.text || "");
 
