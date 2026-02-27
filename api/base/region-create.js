@@ -93,6 +93,29 @@ export default withApi("expensive", async (req, res, { uid }) => {
         return res.status(400).json({ ok: false, error: "INVALID_ORIGIN" });
     }
 
+    // ===============================
+    // 📌 유저 region 개수 제한 검사 (AI 호출 전에 1차 차단)
+    // ===============================
+    try {
+        const myRegionPreSnap = await db
+            .collection("users")
+            .doc(uid)
+            .collection("myregion")
+            .limit(11)
+            .get();
+
+        if (myRegionPreSnap.size >= 10) {
+            return res.status(400).json({
+                ok: false,
+                error: "REGION_LIMIT_EXCEEDED"
+            });
+        }
+    } catch (e) {
+        console.error("region-create precheck ERROR:", e);
+        return res.status(500).json({ ok: false, error: "SERVER_ERROR" });
+    }
+
+
     let refinedDetail = detail;
 
     let safetyResult = {
@@ -252,36 +275,57 @@ ${refinedDetail}
     } catch (err) {
         console.error("originScore 계산 실패:", err);
     }
-
     try {
         const regionRef = db.collection("regionsUsers").doc();
 
-        await regionRef.set({
-            originId,
-            name,
-            koreanName: safetyResult.koreanName,
-            needKorean: safetyResult.needKorean,
-            safety: {
-                nameSafetyScore: safetyResult.nameSafetyScore,
-                detailSafetyScore: safetyResult.detailSafetyScore
-            },
-            detail: refinedDetail,
-            score: originScore,
-            owner: uid,
-            ownerchar: null,
-            charnum: 0,
-            createdAt: new Date()
-        });
+        await db.runTransaction(async (tx) => {
 
-        await db.collection("users")
-            .doc(uid)
-            .collection("myregion")
-            .doc(regionRef.id)
-            .set({
+            // ===============================
+            // 📌 유저 region 개수 제한 검사 (저장 직전 2차 검증)
+            // - 동시 요청(race condition) 완화
+            // ===============================
+            const myRegionCountQuery = db
+                .collection("users")
+                .doc(uid)
+                .collection("myregion")
+                .limit(11);
+
+            const myRegionCountSnap = await tx.get(myRegionCountQuery);
+
+            if (myRegionCountSnap.size >= 10) {
+                throw new Error("REGION_LIMIT_EXCEEDED");
+            }
+
+            // 1️⃣ regionsUsers 저장
+            tx.set(regionRef, {
+                originId,
+                name,
+                koreanName: safetyResult.koreanName,
+                needKorean: safetyResult.needKorean,
+                safety: {
+                    nameSafetyScore: safetyResult.nameSafetyScore,
+                    detailSafetyScore: safetyResult.detailSafetyScore
+                },
+                detail: refinedDetail,
+                score: originScore,
+                owner: uid,
+                ownerchar: null,
+                charnum: 0,
+                createdAt: new Date()
+            });
+
+            // 2️⃣ users/{uid}/myregion에 연결 저장
+            const myRegionRef = db.collection("users")
+                .doc(uid)
+                .collection("myregion")
+                .doc(regionRef.id);
+
+            tx.set(myRegionRef, {
                 regionId: regionRef.id,
                 originId,
                 addedAt: new Date()
             });
+        });
 
         return res.status(200).json({
             ok: true,
@@ -289,6 +333,13 @@ ${refinedDetail}
         });
 
     } catch (err) {
+
+        const code = err?.message || "";
+
+        if (code === "REGION_LIMIT_EXCEEDED") {
+            return res.status(400).json({ ok: false, error: "REGION_LIMIT_EXCEEDED" });
+        }
+
         console.error("region-create DB ERROR:", err);
         return res.status(500).json({ ok: false, error: "SERVER_ERROR" });
     }

@@ -41,6 +41,16 @@ export default withApi("protected", async (req, res, { uid }) => {
             .where("originId", "==", originId)
             .get();
 
+        // 🔢 전체 유저 Region 개수 (default 제외, 전체 myregion 기준)
+        // - 클라이언트에서 "지역 추가하기" 버튼 숨김에 사용
+        // - 10개 제한이므로 11개까지만 읽어서 판단 (비용 절감)
+        const countSnap = await db.collection("users")
+            .doc(uid)
+            .collection("myregion")
+            .limit(11)
+            .get();
+
+
         const regionIds = mySnap.docs
             .map(d => d.data()?.regionId)
             .filter(Boolean);
@@ -82,7 +92,8 @@ export default withApi("protected", async (req, res, { uid }) => {
         ===================================================== */
         return res.status(200).json({
             ok: true,
-            regions: [...baseRegions, ...userRegions]
+            regions: [...baseRegions, ...userRegions],
+            userRegionCount: countSnap.size
         });
 
     } catch (err) {
