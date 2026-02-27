@@ -90,6 +90,7 @@ export async function saveFinalCharacterTx({
             regionId: input.region?.id,
             region: input.region?.name,
             regionDetail: input.region?.detail,
+            regionScore: input.region?.score ?? 0,
 
             fullStory: formattedStory,
             features,

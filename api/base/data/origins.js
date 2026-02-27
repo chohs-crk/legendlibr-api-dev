@@ -4,7 +4,7 @@
 export const ORIGINS = {
     FERRUM_POLIS: {
         id: "FERRUM_POLIS",
-        name: "페룸 폴리스",
+        name: "철혈의 성계",
         desc: "각진 힘, 넘치는 피를 숭배하라",
 
         longDesc: `
@@ -55,7 +55,7 @@ export const ORIGINS = {
 
     EDEN_CINERIS: {
         id: "EDEN_CINERIS",
-        name: "에덴 시네리스",
+        name: "저문 에덴",
         desc: "낙원의 잿더미에서, 금기의 주술이 다시 꽃핀다.",
 
         longDesc: `
@@ -81,7 +81,7 @@ export const ORIGINS = {
 
     ORIGO_PRIMUS: {
         id: "ORIGO_PRIMUS",
-        name: "오리고 프리무스",
+        name: "프리무스",
         desc: "최초의 근원에서 흘러내린 성광이, 모든 존재의 자리를 정한다.",
 
         longDesc: `
@@ -159,7 +159,7 @@ export const ORIGINS = {
     WYVERN_JURASSIC: {
         id: "WYVERN_JURASSIC",
         name: "와이번 쥬라기",
-        desc: "공룡과 드래곤 중 누가 왕좌를 차지했는가",
+        desc: "공룡과 용이 싸우면 누가 이길까?",
 
         longDesc: `
 와이번 쥬라기의 대지는 아직 ‘문명’이라는 이름을 모른다.

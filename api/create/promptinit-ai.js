@@ -322,11 +322,11 @@ ${prompt}
         const promptSafetyScore = clampScore(parsedProfile.promptSafetyScore);
 
         // SAFETY CUT RULES (기존 로직 유지)
-        if (nameSafetyScore >= 85) {
+        if (nameSafetyScore >= 95) {
             await deleteSession(uid);
             throw new Error("NAME_UNSAFE");
         }
-        if (promptSafetyScore >= 90) {
+        if (promptSafetyScore >= 95) {
             await deleteSession(uid);
             throw new Error("PROMPT_UNSAFE");
         }

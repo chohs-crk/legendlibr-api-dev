@@ -58,11 +58,22 @@ export default withApi("protected", async (req, res, { uid }) => {
         /* =========================
            4️⃣ image 필드 업데이트
         ========================= */
+        let fitScore = 0;
+
+        if (image.type === "ai") {
+            const found = Array.isArray(char.aiImages)
+                ? char.aiImages.find(ai => ai.url === image.url)
+                : null;
+
+            fitScore = Number(found?.fitScore || 0);
+        }
+
         await ref.update({
             image: {
                 type: image.type,
                 key: image.key,
-                url: image.url || ""
+                url: image.url || "",
+                fitScore
             }
         });
 
