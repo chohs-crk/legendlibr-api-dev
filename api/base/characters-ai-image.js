@@ -66,6 +66,8 @@ export default withApi("expensive", async (req, res, { uid }) => {
         return res.status(403).json({ ok: false, error: "NOT_OWNER" });
     }
 
+    const originId = typeof char?.originId === "string" ? char.originId : null;
+
     // 2) 선불 차감
     const costFrames = Math.abs(modelInfo.costFrames || 10);
     let userMeta;
@@ -142,6 +144,7 @@ export default withApi("expensive", async (req, res, { uid }) => {
     await jobRef.set({
         uid,
         charId: id,
+        originId,
         userPrompt,
         style: normalizedStyle,
         modelKey: normalizedKey,
