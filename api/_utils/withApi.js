@@ -26,15 +26,29 @@ function getSessionCookie(req) {
     );
 }
 
+function getBearerToken(req) {
+    const authHeader = req.headers.authorization || "";
+    if (!authHeader.startsWith("Bearer ")) return null;
+    return authHeader.slice(7).trim() || null;
+}
+
 async function requireAuth(req, res) {
-    const token = getSessionCookie(req);
-    if (!token) {
+    const sessionToken = getSessionCookie(req);
+    const bearerToken = getBearerToken(req);
+
+    try {
+        if (sessionToken) {
+            const decoded = await auth.verifySessionCookie(sessionToken, true);
+            return decoded.uid;
+        }
+
+        if (bearerToken) {
+            const decoded = await auth.verifyIdToken(bearerToken, true);
+            return decoded.uid;
+        }
+
         res.status(401).json({ ok: false, error: "NO_SESSION" });
         return null;
-    }
-    try {
-        const decoded = await auth.verifySessionCookie(token, true);
-        return decoded.uid;
     } catch {
         res.status(401).json({ ok: false, error: "INVALID_SESSION" });
         return null;
