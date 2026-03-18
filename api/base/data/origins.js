@@ -5,7 +5,7 @@ export const ORIGINS = {
     FERRUM_POLIS: {
         id: "FERRUM_POLIS",
         name: "철혈의 성계",
-        desc: "각진 힘, 넘치는 피를 숭배하라",
+        desc: "비등하는 힘, 넘치는 피를 숭배하라",
 
         longDesc: `
 페룸 폴리스는 ‘도시’가 아니라 하나의 무기다.

@@ -1,4 +1,4 @@
-﻿import {
+import {
     SYSTEM_FOR_FINAL,
     SYSTEM_FOR_STATS,
     buildFinalEndingPrompt,
@@ -140,17 +140,6 @@ function makeDefaultSkill() {
 function normalizeStats(result) {
     if (!result || typeof result !== "object") result = {};
 
-    // traits
-    if (!result.traits || typeof result.traits !== "object") result.traits = {};
-    result.traits.physical = clampInt(result.traits.physical, 1, 10, 5);
-    result.traits.intellectual = clampInt(result.traits.intellectual, 1, 10, 5);
-
-    if (!["선", "중립", "악"].includes(result.traits.alignment)) {
-        result.traits.alignment = "중립";
-    }
-    if (typeof result.traits.growth !== "string") {
-        result.traits.growth = "성장 가능성이 남아 있다.";
-    }
 
     // scores
     if (!result.scores || typeof result.scores !== "object") result.scores = {};

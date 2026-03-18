@@ -1,4 +1,4 @@
-﻿import { db } from "../../../firebaseAdmin.js";
+import { db } from "../../../firebaseAdmin.js";
 //💡
 export const CHAR_LIMIT = 10;
 
@@ -97,7 +97,6 @@ export async function saveFinalCharacterTx({
             storyTheme: output.theme || "",
             storyScore,
 
-            traits: stats?.traits || {},
             scores: stats?.scores || {},
             skills: stats?.skills || [],
 

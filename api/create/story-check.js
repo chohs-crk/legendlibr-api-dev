@@ -1,15 +1,42 @@
 ﻿import { withApi } from "../_utils/withApi.js";
 import { getSession, deleteSession } from "../base/sessionstore.js";
+import { db } from "../../firebaseAdmin.js";
 
 export const config = { runtime: "nodejs" };
 
 export default withApi("protected", async (req, res, { uid }) => {
-
     try {
+        const rawName =
+            typeof req.query?.rawName === "string"
+                ? req.query.rawName.trim()
+                : "";
+
         const s = await getSession(uid);
 
-        // 세션 없음
+        /* ===============================
+           세션 없음
+           - rawName이 있으면 "완료된 캐릭터" 조회 시도
+        =============================== */
         if (!s || typeof s !== "object") {
+            if (rawName) {
+                const snap = await db
+                    .collection("characters")
+                    .where("uid", "==", uid)
+                    .where("displayRawName", "==", rawName)
+                    .orderBy("createdAt", "desc")
+                    .limit(1)
+                    .get();
+
+                if (!snap.empty) {
+                    return res.json({
+                        ok: true,
+                        done: true,
+                        charId: snap.docs[0].id,
+                        rawName
+                    });
+                }
+            }
+
             return res.json({ ok: false });
         }
 
@@ -47,7 +74,7 @@ export default withApi("protected", async (req, res, { uid }) => {
             remain === 0;
 
         /* ===============================
-           🔥 FINAL 타임아웃 자동 정리
+           FINAL 타임아웃 자동 정리
         =============================== */
         if (
             flow === "final" &&
@@ -69,13 +96,38 @@ export default withApi("protected", async (req, res, { uid }) => {
             });
         }
 
+        /* ===============================
+           세션은 final이 아니지만, rawName으로 완성 캐릭터 조회가 필요한 경우
+        =============================== */
+        if (flow !== "final" && rawName) {
+            const snap = await db
+                .collection("characters")
+                .where("uid", "==", uid)
+                .where("displayRawName", "==", rawName)
+                .orderBy("createdAt", "desc")
+                .limit(1)
+                .get();
+
+            if (!snap.empty) {
+                return res.json({
+                    ok: true,
+                    done: true,
+                    charId: snap.docs[0].id,
+                    rawName
+                });
+            }
+        }
+
         return res.json({
             ok: true,
             flow,
             called,
             resed,
             intro: typeof s.output?.intro === "string" ? s.output.intro : "",
-            rawName: typeof s.input?.name === "string" ? s.input.name : "",
+            rawName:
+                typeof s.input?.name === "string"
+                    ? s.input.name
+                    : rawName,
             isFinalFF,
             remain: Number.isFinite(remain) ? remain : 0,
             canRecreateFinal
@@ -84,10 +136,8 @@ export default withApi("protected", async (req, res, { uid }) => {
     } catch (err) {
         console.error("[STORY_CHECK][UNEXPECTED_ERROR]", err);
 
-        // 절대 500으로 죽지 않게 방어
         return res.json({
             ok: false
         });
     }
-
 });

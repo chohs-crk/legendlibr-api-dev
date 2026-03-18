@@ -49,7 +49,7 @@ function toPublicCharacter(doc) {
 /* =========================================================
    메인 핸들러
 ========================================================= */
-export default withApi("protected", async (req, res, { uid }) => {
+export default withApi("public", async (req, res, { uid }) => {
    
 
     try {
@@ -62,6 +62,9 @@ export default withApi("protected", async (req, res, { uid }) => {
     GET /api/characters
  ========================================================= */
         if (req.method === "GET" && !id) {
+            if (!uid) {
+                      return res.status(401).json({ error: "LOGIN_REQUIRED" });
+                  }
             // 🔹 캐릭터 목록
             const snap = await db
                 .collection("characters")
@@ -105,7 +108,7 @@ export default withApi("protected", async (req, res, { uid }) => {
             const data = snap.data();
 
             // UID 일치 여부 검사
-            const isMine = data.uid === uid;
+            const isMine = uid && data.uid === uid;
 
             const safeData = {
                 ...toPublicCharacter(snap),

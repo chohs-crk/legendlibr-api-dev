@@ -1,4 +1,4 @@
-﻿import { SAFETY_RULES_AFTER } from "../../base/safetyrules.js";
+import { SAFETY_RULES_AFTER } from "../../base/safetyrules.js";
 
 // 이하 내용은 기존 final.prompt.js 그대로 유지
 // (SYSTEM_FOR_STATS, SYSTEM_FOR_FINAL, buildFinalEndingPrompt, buildFinalStatsPrompt ...)
@@ -66,20 +66,6 @@ skills 규칙:
   · 수치를 서사로 치환하여 표현
 
 
-
-traits 규칙:
-- physical: 육체적 전투 능력, 체력, 반사신경을 종합 판단하여 1~10 정수
-- intellectual: 전략, 통찰, 상황 판단 능력을 종합하여 1~10 정수
-- alignment:
-   · 선: 타인의 생존과 질서를 우선
-   · 중립: 개인의 기준과 상황 중심
-   · 악: 자신의 목표를 위해 타인을 희생 가능
-- 반드시 위 셋 중 하나만 출력
-- growth:
-   · 이 인물이 앞으로 어떻게 더 강해질 수 있는지
-   · 무엇을 극복해야 성장하는지
-   · 최대 3문장
-   · 추상적 문장 금지
 
 `;
 
@@ -304,7 +290,7 @@ ${endingType === "비극적인 방향의 결말 스토리 작성"
 
 
 /* =========================
-   PROMPT #2 : TRAITS / SCORES / SKILLS
+   PROMPT #2 : SCORES / SKILLS
 ========================= */
 export function buildFinalStatsPrompt({
   input,
@@ -327,12 +313,6 @@ ${input.region?.name} - ${input.region?.detail}
 - 스킬은 반드시 4개여야 한다
 [출력]
 {
-  "traits": {
-    "physical": 1-10,
-    "intellectual": 1-10,
-    "alignment": "선|중립|악",
-    "growth": "성장 가능성 3문장 이내"
-  },
   "scores": {
     "combatScore": 1-10,
     "supportScore": 1-10,
