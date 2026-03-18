@@ -42,7 +42,7 @@ export default withApi("auth", async (req, res) => {
         }
 
         // 3️⃣ 세션 발급
-        const expiresIn = 7 * 24 * 60 * 60 * 1000;
+        const expiresIn = 1000 * 60 * 60 * 24 * 14; // 14일
         const sessionCookie = await auth.createSessionCookie(idToken, {
             expiresIn
         });
