@@ -6,6 +6,11 @@
 import { getSession, setSession, deleteSession } from "../base/sessionstore.js";
 import { callStorySceneWithRetry } from "./callStoryAI.js";
 import { withApi } from "../_utils/withApi.js";
+import {
+    GEMINI_FLASH_LITE_MODEL,
+    GEMINI_THINKING_BUDGET_OFF,
+} from "./gemini-cache.js";
+import { buildStory3DynamicPrompt, buildStorySharedPrefix } from "./story-prompt-cache.js";
 
 /* ================================
    SCENE ROLE SYSTEM - STORY3
@@ -38,9 +43,6 @@ const STORY3_SYSTEM = `
 선택지를 그대로 다시 쓰지 말고 실행 장면을 구체적으로 묘사하라.
 `;
 
-/* ================================
-   AI USAGE LOGGER
-================================ */
 function pushUsageCall(session, call) {
     if (!session.aiUsage) {
         session.aiUsage = { calls: [] };
@@ -50,7 +52,6 @@ function pushUsageCall(session, call) {
         stage: call.stage,
         tag: call.tag,
         modelId: call.modelId || "unknown",
-
         promptTokens: call.usageMetadata?.promptTokenCount ?? null,
         outputTokens: call.usageMetadata?.candidatesTokenCount ?? null,
         totalTokens:
@@ -58,58 +59,10 @@ function pushUsageCall(session, call) {
             ((call.usageMetadata?.promptTokenCount ?? 0) +
                 (call.usageMetadata?.candidatesTokenCount ?? 0)) ??
             null,
-
         ts: Date.now(),
     });
 }
 
-/* ================================
-   BUILD PROMPT
-================================ */
-function buildPrompt(s) {
-    const origin = s.input.origin;
-    const region = s.input.region;
-
-    const { intro, speechStyle, narrationStyle, theme, profile } = s.output;
-
-    const prevStory = s.output.story1?.story || "";
-    const selectedIndex = s.selected?.story1;
-    const selectedChoice = s.output.story1?.choices?.[selectedIndex]?.text || "";
-
-    return `
-[이전 장면]
-${prevStory}
-
-[이미 실행된 행동]
-${selectedChoice}
-
-이 행동은 이미 실제로 벌어졌다.
-그 이후 벌어질 장면을 구체적으로 묘사한다.
-
-[소설 주인공 소개]
-${intro}
-
-[말투 지시]
-${speechStyle}
-
-[문체 지시]
-${narrationStyle}
-
-[설정 메모]
-${profile}
-
-[세계]
-기원: ${origin.name} - ${origin.desc}
-지역: ${region.name} - ${region.detail}
-
-[주제]
-${theme}
-  `.trim();
-}
-
-/* ================================
-   SSE UTIL
-================================ */
 function escapeSSEData(text) {
     return String(text || "")
         .replace(/\r?\n/g, " ")
@@ -117,9 +70,6 @@ function escapeSSEData(text) {
         .trim();
 }
 
-/* ================================
-   STREAM
-================================ */
 async function stream(uid, s, res) {
     res.writeHead(200, {
         "Content-Type": "text/event-stream",
@@ -128,20 +78,29 @@ async function stream(uid, s, res) {
     });
 
     try {
-        // ✅ 세션 상태: 호출 시작
         s.called = true;
         s.resed = false;
         s.lastCall = Date.now();
         await setSession(uid, s);
 
-        const prompt = buildPrompt(s);
+        const cachedContent = s.aiCache?.storyPrefix?.name || null;
+        const sharedPrefix = buildStorySharedPrefix(s);
+        const dynamicPrompt = buildStory3DynamicPrompt(s);
+        const prompt = cachedContent
+            ? dynamicPrompt
+            : `${sharedPrefix}
+
+${dynamicPrompt}`.trim();
+        const modelId = s.aiCache?.storyPrefix?.modelId || GEMINI_FLASH_LITE_MODEL;
 
         const result = await callStorySceneWithRetry(uid, prompt, STORY3_SYSTEM, {
-            modelId: "gemini-2.5-flash",
-            temperature: 0.35,
+            modelId,
+            cachedContent,
+            temperature: 0.3,
             topP: 0.8,
-            maxOutputTokens: 1024,
-            maxRetry: 3,
+            maxOutputTokens: 768,
+            maxRetry: 2,
+            thinkingBudget: GEMINI_THINKING_BUDGET_OFF,
         });
 
         const scene = result.scene;
@@ -153,7 +112,6 @@ async function stream(uid, s, res) {
             usageMetadata: result.usageMetadata,
         });
 
-        // ✅ 서버 저장 (score 포함, 클라이언트 전송 X)
         s.output.story3 = {
             story: scene.story,
             choices: scene.choices.map((c) => ({
@@ -165,10 +123,7 @@ async function stream(uid, s, res) {
         s.resed = true;
         await setSession(uid, s);
 
-        // ✅ 스토리 전송
         res.write(`data: ${escapeSSEData(scene.story)}\n\n`);
-
-        // ✅ 선택지 전송 (text만)
         res.write(
             `event: choices\ndata: ${JSON.stringify({
                 choices: scene.choices.map((c) => c.text),
@@ -179,17 +134,12 @@ async function stream(uid, s, res) {
         res.end();
     } catch (err) {
         console.error("[STORY3][FAIL_FINAL]", { uid, err: err?.message });
-
         await deleteSession(uid);
-
         res.write(`event: error\ndata: STREAM_FAILED\n\n`);
         res.end();
     }
 }
 
-/* ================================
-   HANDLER
-================================ */
 export default withApi("expensive", async (req, res, { uid }) => {
     const s = await getSession(uid);
     if (!s || !s.nowFlow.story3) {

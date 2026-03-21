@@ -5,7 +5,15 @@ import {
     SYSTEM_PROMPT_PROFILE,
     SYSTEM_PROMPT_STYLE
 } from "./promptinit-ai.prompt.js";
-
+import {
+    GEMINI_FLASH_LITE_MODEL,
+    GEMINI_API_VERSION,
+    GEMINI_THINKING_BUDGET_OFF,
+    STORY_CACHE_TTL,
+    createTextCache,
+    shouldCreateStoryCache,
+} from "./gemini-cache.js";
+import { buildStorySharedPrefix } from "./story-prompt-cache.js";
 
 /* =========================
    UTILS
@@ -29,11 +37,9 @@ function safeParseJSON(text) {
         let cleaned = safeStr(text).replace(/```json|```/g, "").trim();
         if (!cleaned) return null;
 
-        // 1) 첫 '{' 이전 쓰레기 제거
         const first = cleaned.indexOf("{");
         if (first > 0) cleaned = cleaned.slice(first);
 
-        // 2) 마지막 '}'까지 잘라서 시도
         const lastBrace = cleaned.lastIndexOf("}");
         if (lastBrace !== -1) {
             const candidate = cleaned.slice(0, lastBrace + 1);
@@ -44,7 +50,6 @@ function safeParseJSON(text) {
             }
         }
 
-        // 3) 중괄호 개수 맞추기(간단 보정)
         const open = (cleaned.match(/{/g) || []).length;
         const close = (cleaned.match(/}/g) || []).length;
         if (open > close) cleaned += "}".repeat(open - close);
@@ -54,6 +59,7 @@ function safeParseJSON(text) {
         return null;
     }
 }
+
 /* =========================
    AI USAGE LOGGER
 ========================= */
@@ -66,27 +72,21 @@ function pushUsageCall(session, call) {
         stage: call.stage,
         tag: call.tag,
         modelId: call.modelId || "unknown",
-
-        promptTokens:
-            call.usageMetadata?.promptTokenCount ?? null,
-
-        outputTokens:
-            call.usageMetadata?.candidatesTokenCount ?? null,
-
+        promptTokens: call.usageMetadata?.promptTokenCount ?? null,
+        outputTokens: call.usageMetadata?.candidatesTokenCount ?? null,
         totalTokens:
             call.usageMetadata?.totalTokenCount ??
-            (
-                (call.usageMetadata?.promptTokenCount ?? 0) +
-                (call.usageMetadata?.candidatesTokenCount ?? 0)
-            ) ?? null,
-
-        ts: Date.now()
+            ((call.usageMetadata?.promptTokenCount ?? 0) +
+                (call.usageMetadata?.candidatesTokenCount ?? 0)) ??
+            null,
+        ts: Date.now(),
     });
 }
+
 function isBadExampleValue(s) {
     const t = safeStr(s);
     if (!t) return true;
-    return ["홍길동", "기타", "예시"].some(b => t.includes(b));
+    return ["홍길동", "기타", "예시"].some((b) => t.includes(b));
 }
 
 function clampScore(n) {
@@ -94,87 +94,163 @@ function clampScore(n) {
     return Math.min(100, Math.max(0, Math.trunc(v)));
 }
 
+function shouldFallbackModel(err) {
+    const message = String(err?.message || "");
+    const status = err?.status;
+    return (
+        status === 400 ||
+        status === 404 ||
+        message.includes("not found") ||
+        message.includes("unsupported") ||
+        message.includes("not supported") ||
+        message.includes("Unknown model")
+    );
+}
 
-/* =========================
-   GEMINI REQUEST
-========================= */
 async function requestGemini({
-    modelId,  // ✅ 추가
+    modelId = GEMINI_FLASH_LITE_MODEL,
     systemPrompt,
     userPrompt,
     temperature,
     maxTokens,
+    thinkingBudget = GEMINI_THINKING_BUDGET_OFF,
+    cachedContent = null,
     uid,
-    tag
+    tag,
 }) {
-    const MODEL_ID = modelId; 
-    const API_VERSION = "v1beta";
+    const candidateModels = [...new Set([modelId, "gemini-2.5-flash-lite"])];
+    let lastErr = null;
 
-    const res = await fetch(
-        `https://generativelanguage.googleapis.com/${API_VERSION}/models/${MODEL_ID}:generateContent`,
-        {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "x-goog-api-key": process.env.GEMINI_API_KEY
-            },
-            body: JSON.stringify({
-                systemInstruction: {
-                    parts: [{ text: systemPrompt }]
-                },
-                contents: [
-                    {
-                        role: "user",
-                        parts: [{ text: userPrompt }]
-                    }
-                ],
-                generationConfig: {
-                    temperature,
-                    topP: 0.9,
-                    maxOutputTokens: maxTokens
-                },
-                safetySettings: [
-                    { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-                    { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" }
-                ]
-            })
+    for (const MODEL_ID of candidateModels) {
+        try {
+            const res = await fetch(
+                `https://generativelanguage.googleapis.com/${GEMINI_API_VERSION}/models/${MODEL_ID}:generateContent`,
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "x-goog-api-key": process.env.GEMINI_API_KEY,
+                    },
+                    body: JSON.stringify({
+                        systemInstruction: {
+                            parts: [{ text: systemPrompt }],
+                        },
+                        contents: [
+                            {
+                                role: "user",
+                                parts: [{ text: userPrompt }],
+                            },
+                        ],
+                        ...(cachedContent ? { cachedContent } : {}),
+                        generationConfig: {
+                            temperature,
+                            topP: 0.9,
+                            maxOutputTokens: maxTokens,
+                            thinkingConfig: {
+                                thinkingBudget,
+                            },
+                        },
+                        safetySettings: [
+                            { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+                            { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+                        ],
+                    }),
+                }
+            );
+
+            const data = await res.json().catch(() => null);
+
+            if (!res.ok) {
+                const errorDetail = data || {};
+                console.error("[AI][API_ERROR_DETAIL]", {
+                    uid,
+                    tag,
+                    modelId: MODEL_ID,
+                    status: res.status,
+                    statusText: res.statusText,
+                    error: errorDetail,
+                });
+                const err = new Error(errorDetail?.error?.message || "GEMINI_REQUEST_FAILED");
+                err.status = res.status;
+                err.details = errorDetail;
+                throw err;
+            }
+
+            console.log("[AI][FINISH_REASON]", {
+                uid,
+                tag,
+                modelId: MODEL_ID,
+                finishReason: data?.candidates?.[0]?.finishReason,
+            });
+
+            const text =
+                data?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || null;
+
+            console.log("[AI][RAW RESPONSE]", {
+                uid,
+                tag,
+                modelId: MODEL_ID,
+                raw: text || null,
+            });
+
+            const usageMetadata = data?.usageMetadata || null;
+            return { text, data, usageMetadata, modelId: MODEL_ID };
+        } catch (err) {
+            lastErr = err;
+            if (!shouldFallbackModel(err) || MODEL_ID === candidateModels[candidateModels.length - 1]) {
+                throw err;
+            }
         }
-    );
-
-    if (!res.ok) {
-        const errorDetail = await res.json().catch(() => ({}));
-        console.error("[AI][API_ERROR_DETAIL]", {
-            uid,
-            tag,
-            status: res.status,
-            statusText: res.statusText,
-            error: errorDetail
-        });
-        throw new Error("GEMINI_REQUEST_FAILED");
     }
 
-    const data = await res.json();
-    console.log("[AI][FINISH_REASON]", {
-        uid,
-        tag,
-        finishReason: data.candidates?.[0]?.finishReason
-    });
-
-    const text =
-        data.candidates?.[0]?.content?.parts
-            ?.map(p => p.text || "")
-            .join("") || null;
-
-    console.log("[AI][RAW RESPONSE]", {
-        uid,
-        tag,
-        raw: text || null
-    });
-
-    const usageMetadata = data?.usageMetadata || null;
-    return { text, data, usageMetadata, modelId: MODEL_ID };
+    throw lastErr || new Error("GEMINI_REQUEST_FAILED");
 }
 
+async function createStoryPrefixCache(uid, session) {
+    const prefixText = buildStorySharedPrefix(session);
+
+    session.aiCache = session.aiCache || {};
+    session.aiCache.storyPrefix = {
+        name: null,
+        modelId: GEMINI_FLASH_LITE_MODEL,
+        ttl: STORY_CACHE_TTL,
+        sourceChars: prefixText.length,
+        enabled: shouldCreateStoryCache(prefixText),
+    };
+
+    if (!session.aiCache.storyPrefix.enabled) {
+        return;
+    }
+
+    try {
+        const cache = await createTextCache({
+            modelId: GEMINI_FLASH_LITE_MODEL,
+            displayName: `story-prefix-${uid}`,
+            text: prefixText,
+            ttl: STORY_CACHE_TTL,
+            uid,
+        });
+
+        session.aiCache.storyPrefix = {
+            name: cache.name || null,
+            modelId: cache.modelId || GEMINI_FLASH_LITE_MODEL,
+            ttl: STORY_CACHE_TTL,
+            sourceChars: prefixText.length,
+            cachedContentTokenCount: cache.cachedContentTokenCount,
+            expireTime: cache.expireTime,
+            enabled: true,
+        };
+    } catch (err) {
+        session.aiCache.storyPrefix = {
+            name: null,
+            modelId: GEMINI_FLASH_LITE_MODEL,
+            ttl: STORY_CACHE_TTL,
+            sourceChars: prefixText.length,
+            enabled: false,
+            failReason: err?.message || "CACHE_CREATE_FAILED",
+        };
+    }
+}
 
 /* =========================
    MAIN
@@ -185,7 +261,6 @@ export async function callAI(uid) {
 
     const { origin, region, name, prompt } = s.input;
 
-    // originGuide는 "2차 호출 입력"에만 포함(요구사항 반영)
     const originGuide = origin?.narrationGuide
         ? `
 [기원 서술 가이드]
@@ -200,10 +275,6 @@ export async function callAI(uid) {
 - (가이드 없음) 기원 설명과 지역 설명을 바탕으로 자연스러운 문체를 스스로 설정하라
 `;
 
-    /* =========================
-       1차 호출 입력 (소개 전용)
-       - 요구사항 그대로 구성
-    ========================= */
     const profilePrompt = `
 기원: ${origin?.name || ""} - ${origin?.desc || ""}
 기원 추가설명: ${origin?.longDesc || ""}
@@ -222,10 +293,6 @@ ${prompt}
 - 출력은 반드시 JSON만
 `.trim();
 
-    /* =========================
-       2차 호출 입력 (스타일 전용)
-       - 요구사항 그대로 구성
-    ========================= */
     const stylePrompt = `
 [유저 입력 원본]
 이름 원문: ${name}
@@ -241,24 +308,21 @@ ${prompt}
 `.trim();
 
     try {
-        /* =========================
-           1차 호출: PROFILE JSON
-           - 파싱 실패 시 1회 재시도
-        ========================= */
         const first = await requestGemini({
-            modelId: "gemini-2.5-flash-lite",   // ✅ 추가
+            modelId: GEMINI_FLASH_LITE_MODEL,
             systemPrompt: SYSTEM_PROMPT_PROFILE,
             userPrompt: profilePrompt,
             temperature: 0.6,
             maxTokens: 4096,
+            thinkingBudget: GEMINI_THINKING_BUDGET_OFF,
             uid,
-            tag: "PROFILE_1"
+            tag: "PROFILE_1",
         });
         pushUsageCall(s, {
             stage: "refine",
             tag: "PROFILE_1",
             modelId: first.modelId,
-            usageMetadata: first.usageMetadata
+            usageMetadata: first.usageMetadata,
         });
 
         if (!first.text) {
@@ -273,19 +337,20 @@ ${prompt}
             console.warn("[AI][PARSE_FAIL_RETRYING][PROFILE]", { uid });
 
             const retry = await requestGemini({
-                modelId: "gemini-2.5-flash-lite",  // ✅ 추가
+                modelId: GEMINI_FLASH_LITE_MODEL,
                 systemPrompt: SYSTEM_PROMPT_PROFILE,
                 userPrompt: profilePrompt,
                 temperature: 0.5,
                 maxTokens: 3072,
+                thinkingBudget: GEMINI_THINKING_BUDGET_OFF,
                 uid,
-                tag: "PROFILE_1_RETRY"
+                tag: "PROFILE_1_RETRY",
             });
             pushUsageCall(s, {
                 stage: "refine",
                 tag: "PROFILE_1_RETRY",
                 modelId: retry.modelId,
-                usageMetadata: retry.usageMetadata
+                usageMetadata: retry.usageMetadata,
             });
 
             parsedProfile = safeParseJSON(retry.text || "");
@@ -299,15 +364,11 @@ ${prompt}
             console.log("[AI][RECOVERED_AFTER_RETRY][PROFILE]", { uid });
         }
 
-        // PROFILE 필드 기본값 보정
         parsedProfile.nameSafetyScore ??= 0;
         parsedProfile.promptSafetyScore ??= 0;
         parsedProfile.name ??= name;
         parsedProfile.needKorean ??= false;
 
-    
-
-        // 최소 유효성
         if (
             typeof parsedProfile !== "object" ||
             parsedProfile.nameSafetyScore === undefined ||
@@ -321,7 +382,6 @@ ${prompt}
         const nameSafetyScore = clampScore(parsedProfile.nameSafetyScore);
         const promptSafetyScore = clampScore(parsedProfile.promptSafetyScore);
 
-        // SAFETY CUT RULES (기존 로직 유지)
         if (nameSafetyScore >= 95) {
             await deleteSession(uid);
             throw new Error("NAME_UNSAFE");
@@ -331,38 +391,31 @@ ${prompt}
             throw new Error("PROMPT_UNSAFE");
         }
 
-        // name / intro / profile 정리
         let outName = safeStr(parsedProfile.name);
         if (isBadExampleValue(outName)) outName = safeStr(name);
 
         let intro = safeStr(parsedProfile.intro);
 
-        /* =========================
-           2차 호출: STYLE JSON
-           - 목적: speechStyle / narrationStyle 안정 추출
-           - 파싱 실패해도 "서비스 진행은 가능"하게 폴백 처리
-           - (필요 시 여기서만 deleteSession/에러로 바꿀 수도 있음)
-        ========================= */
         let speechStyle = "정보가 없습니다 다른 내용들을 참조해서 생성하시오";
         let narrationStyle = "3인칭 서술, 절제된 어휘, 사건 중심의 간결한 호흡";
         let profile = "없음";
         try {
             const second = await requestGemini({
-                modelId: "gemini-flash-latest",   // ✅ 변경
+                modelId: GEMINI_FLASH_LITE_MODEL,
                 systemPrompt: SYSTEM_PROMPT_STYLE,
                 userPrompt: stylePrompt,
-                temperature: 0.5,
-                maxTokens: 4096,
+                temperature: 0.4,
+                maxTokens: 2048,
+                thinkingBudget: GEMINI_THINKING_BUDGET_OFF,
                 uid,
-                tag: "STYLE_2"
+                tag: "STYLE_2",
             });
             pushUsageCall(s, {
                 stage: "refine",
                 tag: "STYLE_2",
                 modelId: second.modelId,
-                usageMetadata: second.usageMetadata
+                usageMetadata: second.usageMetadata,
             });
-
 
             if (!second.text) {
                 console.warn("[AI][EMPTY RESPONSE][STYLE]", { uid });
@@ -373,19 +426,20 @@ ${prompt}
                     console.warn("[AI][PARSE_FAIL_RETRYING][STYLE]", { uid });
 
                     const retry2 = await requestGemini({
-                        modelId: "gemini-flash-latest",   // ✅ 추가
+                        modelId: GEMINI_FLASH_LITE_MODEL,
                         systemPrompt: SYSTEM_PROMPT_STYLE,
                         userPrompt: stylePrompt,
-                        temperature: 0.4,
-                        maxTokens: 4096,
+                        temperature: 0.3,
+                        maxTokens: 2048,
+                        thinkingBudget: GEMINI_THINKING_BUDGET_OFF,
                         uid,
-                        tag: "STYLE_2_RETRY"
+                        tag: "STYLE_2_RETRY",
                     });
                     pushUsageCall(s, {
                         stage: "refine",
                         tag: "STYLE_2_RETRY",
                         modelId: retry2.modelId,
-                        usageMetadata: retry2.usageMetadata
+                        usageMetadata: retry2.usageMetadata,
                     });
 
                     parsedStyle = safeParseJSON(retry2.text || "");
@@ -395,7 +449,6 @@ ${prompt}
                         parsedStyle = null;
                         speechStyle = "정보가 없습니다 다른 내용들을 참조해서 생성하시오";
                         narrationStyle = "3인칭 서술, 절제된 어휘, 사건 중심의 간결한 호흡";
-
                     } else {
                         console.log("[AI][RECOVERED_AFTER_RETRY][STYLE]", { uid });
                     }
@@ -410,50 +463,42 @@ ${prompt}
                     if (ns) narrationStyle = ns;
                     if (pf) profile = pf;
                 }
-
             }
         } catch (styleErr) {
-            // 2차는 "안정성 강화용"이라 실패 시 폴백으로 진행
             console.warn("[AI][STYLE_CALL_FAILED_FALLBACK]", {
                 uid,
-                message: styleErr?.message || "STYLE_CALL_FAILED"
+                message: styleErr?.message || "STYLE_CALL_FAILED",
             });
         }
 
-        // 길이 제한 보강(모델이 조금 넘겨도 잘라서 안정화)
         if (speechStyle.length > 120) speechStyle = speechStyle.slice(0, 120);
         if (narrationStyle.length > 240) narrationStyle = narrationStyle.slice(0, 240);
 
-        // 🔒 SAFETY는 output과 분리해서 보존(기존 유지)
         s.metaSafety = {
             nameSafetyScore,
-            promptSafetyScore
+            promptSafetyScore,
         };
 
-        // 최종 output은 "기존과 동일한 구조" 유지
         s.output = {
             nameSafetyScore,
             promptSafetyScore,
-
             name: outName,
             needKorean: normalizeBool(parsedProfile.needKorean, false),
             profile,
             existence: safeStr(parsedProfile.existence),
             intro,
             canSpeak: normalizeBool(parsedProfile.canSpeak, true),
-
             speechStyle,
             narrationStyle,
-
-            theme: safeStr(parsedProfile.theme)
+            theme: safeStr(parsedProfile.theme),
         };
 
-        // flow 진행(기존 유지)
+        await createStoryPrefixCache(uid, s);
+
         s.nowFlow.refine = false;
         s.nowFlow.story1 = true;
 
         await setSession(uid, s);
-
     } catch (err) {
         console.error("[callAI] ERROR:", err);
         await deleteSession(uid);
@@ -465,7 +510,7 @@ ${prompt}
             err.message === "AI_EMPTY_RESPONSE" ||
             err.message === "AI_JSON_PARSE_FAIL"
         ) {
-            throw err; // 그대로 전달
+            throw err;
         }
 
         throw new Error("AI_CALL_FAILED");

@@ -1,18 +1,19 @@
 ﻿// /api/create/callStoryAI.js
 import { SAFETY_RULES_AFTER } from "../base/safetyrules.js";
+import {
+    GEMINI_API_VERSION,
+    GEMINI_FLASH_LITE_MODEL,
+    GEMINI_THINKING_BUDGET_OFF,
+    getPreferredModelList,
+} from "./gemini-cache.js";
 
 /**
  * ✅ 모델 출력 형식(=JSON)은 "generationConfig.responseMimeType/responseJsonSchema"로 강제한다.
  *    → 태그(<STORY>, <CHOICES>) 파싱 자체를 제거해서 99%+ 안정화.
- *
- * 참고: Structured outputs (JSON Schema) 공식 문서
- * - responseMimeType: "application/json"
- * - responseJsonSchema 제공
  */
 
 /* =========================================
    1) BASE NARRATIVE SYSTEM (공통 서사 규칙)
-   - 출력 포맷(태그 등) 강제 문구는 제거
 ========================================= */
 export const BASE_NARRATIVE_SYSTEM = `
 ${SAFETY_RULES_AFTER}
@@ -152,8 +153,7 @@ export const SCENE_RESPONSE_SCHEMA = {
     additionalProperties: false,
 };
 
-const DEFAULT_MODEL_ID = "gemini-flash-latest"; // ✅ 구조화 출력 지원 모델 사용 권장 :contentReference[oaicite:6]{index=6}
-const API_VERSION = "v1beta";
+const DEFAULT_MODEL_ID = GEMINI_FLASH_LITE_MODEL;
 
 function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
@@ -163,14 +163,12 @@ function extractCandidateText(respJson) {
     const candidate = respJson?.candidates?.[0];
     if (!candidate) return "";
 
-    // 정상 케이스
     if (Array.isArray(candidate.content?.parts)) {
         return candidate.content.parts
-            .map(p => typeof p?.text === "string" ? p.text : "")
+            .map((p) => (typeof p?.text === "string" ? p.text : ""))
             .join("");
     }
 
-    // fallback: 일부 응답은 text 필드 직접 포함
     if (typeof candidate.output === "string") {
         return candidate.output;
     }
@@ -183,11 +181,8 @@ function safeJsonParse(maybeJsonText) {
 
     if (!t) throw new Error("EMPTY_MODEL_TEXT");
 
-    // ```json ... ``` 제거
     if (t.startsWith("```")) {
-        t = t.replace(/```json/g, "")
-            .replace(/```/g, "")
-            .trim();
+        t = t.replace(/```json/g, "").replace(/```/g, "").trim();
     }
 
     try {
@@ -226,7 +221,6 @@ function normalizeScene(obj) {
         })
         .filter((c) => c.text);
 
-    // 중복 제거(안전망)
     const dedup = [];
     const seen = new Set();
     for (const c of normalized) {
@@ -258,52 +252,74 @@ ${sceneRoleSystem}
   `.trim();
 }
 
-/* =========================================
-   3) GENERATE SCENE (Structured Output)
-========================================= */
-async function callSceneStructured(prompt, sceneRoleSystem, opts = {}) {
-    const modelId = opts.modelId || DEFAULT_MODEL_ID;
-    const temperature = 0.25;
+function buildGenerationConfig(opts = {}, structured = true) {
+    const temperature = opts.temperature ?? 0.25;
     const topP = opts.topP ?? 0.8;
-    const maxOutputTokens = 4096;
+    const maxOutputTokens = opts.maxOutputTokens ?? 1024;
+    const thinkingBudget = Number.isInteger(opts.thinkingBudget)
+        ? opts.thinkingBudget
+        : GEMINI_THINKING_BUDGET_OFF;
 
-    const systemText = buildSystemText(sceneRoleSystem);
+    const generationConfig = {
+        temperature,
+        topP,
+        maxOutputTokens,
+        thinkingConfig: {
+            thinkingBudget,
+        },
+    };
 
+    if (structured) {
+        generationConfig.responseMimeType = "application/json";
+        generationConfig.responseJsonSchema = SCENE_RESPONSE_SCHEMA;
+    }
+
+    return generationConfig;
+}
+
+function buildRequestBody(prompt, systemText, opts = {}, structured = true, extraParts = []) {
+    const cachedContent = opts.cachedContent || null;
+    const body = {
+        systemInstruction: { parts: [{ text: systemText }] },
+        contents: [{ role: "user", parts: [{ text: prompt }, ...extraParts] }],
+        generationConfig: buildGenerationConfig(opts, structured),
+    };
+
+    if (cachedContent) {
+        body.cachedContent = cachedContent;
+    }
+
+    return body;
+}
+
+function shouldFallbackModel(err) {
+    const message = String(err?.message || "");
+    const status = err?.status;
+    return (
+        status === 400 ||
+        status === 404 ||
+        message.includes("not found") ||
+        message.includes("unsupported") ||
+        message.includes("not supported") ||
+        message.includes("Unknown model")
+    );
+}
+
+async function executeGeminiRequest(modelId, body) {
     const res = await fetch(
-        `https://generativelanguage.googleapis.com/${API_VERSION}/models/${modelId}:generateContent`,
+        `https://generativelanguage.googleapis.com/${GEMINI_API_VERSION}/models/${modelId}:generateContent`,
         {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
                 "x-goog-api-key": process.env.GEMINI_API_KEY,
             },
-            body: JSON.stringify({
-                systemInstruction: { parts: [{ text: systemText }] },
-                contents: [{ role: "user", parts: [{ text: prompt }] }],
-                generationConfig: {
-                    temperature,
-                    topP,
-                    maxOutputTokens,
-                    responseMimeType: "application/json",
-                    responseJsonSchema: SCENE_RESPONSE_SCHEMA,
-                },
-            }),
+            body: JSON.stringify(body),
         }
     );
 
     const data = await res.json().catch(() => null);
-    if (!data?.candidates?.length) {
-        throw new Error("NO_CANDIDATE");
-    }
-    const candidate = data.candidates[0];
 
-    if (candidate.finishReason === "MAX_TOKENS") {
-        throw new Error("MODEL_TRUNCATED");
-    }
-
-    if (candidate.finishReason === "SAFETY") {
-        throw new Error("SAFETY_BLOCKED");
-    }
     if (!res.ok) {
         const msg = data?.error?.message || "GEMINI_REQUEST_FAILED";
         const err = new Error(msg);
@@ -312,25 +328,47 @@ async function callSceneStructured(prompt, sceneRoleSystem, opts = {}) {
         throw err;
     }
 
-    const rawText = extractCandidateText(data);
-    const parsed = safeJsonParse(rawText);
-    const scene = normalizeScene(parsed);
+    const candidate = data?.candidates?.[0];
+    if (!candidate) {
+        throw new Error("NO_CANDIDATE");
+    }
+    if (candidate.finishReason === "MAX_TOKENS") {
+        throw new Error("MODEL_TRUNCATED");
+    }
+    if (candidate.finishReason === "SAFETY") {
+        throw new Error("SAFETY_BLOCKED");
+    }
 
-    return { modelId, usageMetadata: data?.usageMetadata ?? null, scene, rawText };
+    return { data, candidate };
 }
 
-/**
- * ✅ JSON 모드가 모델에서 비활성인 경우(드물지만) 대비: "프롬프트로 JSON만" 유도 후 파싱
- * - 2.5 Flash는 지원하므로 보통 여기까지 올 일 없음.
- */
-async function callScenePromptJSON(prompt, sceneRoleSystem, opts = {}) {
-    const modelId = opts.modelId || DEFAULT_MODEL_ID;
-    const temperature = opts.temperature ?? 0.25;
-    const topP = opts.topP ?? 0.8;
-    const maxOutputTokens = opts.maxOutputTokens ?? 1024;
-
+async function callSceneStructured(prompt, sceneRoleSystem, opts = {}) {
+    const models = getPreferredModelList(opts.modelId || DEFAULT_MODEL_ID);
     const systemText = buildSystemText(sceneRoleSystem);
+    let lastErr = null;
 
+    for (const modelId of models) {
+        try {
+            const body = buildRequestBody(prompt, systemText, opts, true);
+            const { data } = await executeGeminiRequest(modelId, body);
+            const rawText = extractCandidateText(data);
+            const parsed = safeJsonParse(rawText);
+            const scene = normalizeScene(parsed);
+            return { modelId, usageMetadata: data?.usageMetadata ?? null, scene, rawText };
+        } catch (err) {
+            lastErr = err;
+            if (!shouldFallbackModel(err) || modelId === models[models.length - 1]) {
+                throw err;
+            }
+        }
+    }
+
+    throw lastErr || new Error("GEMINI_REQUEST_FAILED");
+}
+
+async function callScenePromptJSON(prompt, sceneRoleSystem, opts = {}) {
+    const models = getPreferredModelList(opts.modelId || DEFAULT_MODEL_ID);
+    const systemText = buildSystemText(sceneRoleSystem);
     const hardJsonPrompt = `
 아래 JSON만 출력한다. 다른 텍스트 금지.
 
@@ -347,79 +385,42 @@ async function callScenePromptJSON(prompt, sceneRoleSystem, opts = {}) {
 이제 장면을 작성하라.
   `.trim();
 
-    const res = await fetch(
-        `https://generativelanguage.googleapis.com/${API_VERSION}/models/${modelId}:generateContent`,
-        {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "x-goog-api-key": process.env.GEMINI_API_KEY,
-            },
-            body: JSON.stringify({
-                systemInstruction: { parts: [{ text: systemText }] },
-                contents: [
-                    { role: "user", parts: [{ text: prompt }] },
-                    { role: "user", parts: [{ text: hardJsonPrompt }] },
-                ],
-                generationConfig: { temperature, topP, maxOutputTokens },
-            }),
+    let lastErr = null;
+
+    for (const modelId of models) {
+        try {
+            const body = buildRequestBody(prompt, systemText, opts, false, [{ text: hardJsonPrompt }]);
+            const { data } = await executeGeminiRequest(modelId, body);
+            const rawText = extractCandidateText(data);
+            if (!rawText || !rawText.trim()) {
+                throw new Error("EMPTY_MODEL_TEXT");
+            }
+            const parsed = safeJsonParse(rawText);
+            const scene = normalizeScene(parsed);
+            return { modelId, usageMetadata: data?.usageMetadata ?? null, scene, rawText };
+        } catch (err) {
+            lastErr = err;
+            if (!shouldFallbackModel(err) || modelId === models[models.length - 1]) {
+                throw err;
+            }
         }
-    );
-
-    const data = await res.json().catch(() => null);
-    if (!res.ok) {
-        const msg = data?.error?.message || "GEMINI_REQUEST_FAILED";
-        const err = new Error(msg);
-        err.status = res.status;
-        err.details = data;
-        throw err;
-    }
-    const candidate = data?.candidates?.[0];
-
-    if (!candidate) {
-        throw new Error("NO_CANDIDATE");
-    }
-    if (candidate.finishReason === "MAX_TOKENS") {
-        throw new Error("MODEL_TRUNCATED");
     }
 
-    if (candidate.finishReason === "SAFETY") {
-        throw new Error("SAFETY_BLOCKED");
-    }
-    if (candidate.finishReason === "SAFETY") {
-        throw new Error("SAFETY_BLOCKED");
-    }
-    const rawText = extractCandidateText(data);
-
-    if (!rawText || !rawText.trim()) {
-        throw new Error("EMPTY_MODEL_TEXT");
-    }
-    const parsed = safeJsonParse(rawText);
-    const scene = normalizeScene(parsed);
-
-    return { modelId, usageMetadata: data?.usageMetadata ?? null, scene, rawText };
+    throw lastErr || new Error("GEMINI_REQUEST_FAILED");
 }
 
-/**
- * 외부에서 쓰는 단일 API:
- * - structured 먼저 시도 → (JSON mode 미지원 에러면) prompt JSON fallback
- */
 export async function callStoryScene(uid, prompt, sceneRoleSystem, opts = {}) {
     try {
         return await callSceneStructured(prompt, sceneRoleSystem, opts);
     } catch (e) {
         const msg = String(e?.message || "");
         if (msg.includes("JSON mode is not enabled")) {
-            // fallback
             return await callScenePromptJSON(prompt, sceneRoleSystem, opts);
         }
         throw e;
     }
 }
 
-/**
- * ✅ 99%+ 안정화를 위한 재시도 래퍼
- */
 export async function callStorySceneWithRetry(uid, prompt, sceneRoleSystem, opts = {}) {
     const maxRetry = opts.maxRetry ?? 3;
 
@@ -429,7 +430,6 @@ export async function callStorySceneWithRetry(uid, prompt, sceneRoleSystem, opts
             return await callStoryScene(uid, prompt, sceneRoleSystem, opts);
         } catch (e) {
             lastErr = e;
-            // 가벼운 backoff
             await sleep(200 * (i + 1));
         }
     }
