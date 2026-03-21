@@ -1,4 +1,4 @@
-﻿export const config = {
+export const config = {
     runtime: "nodejs",
     compute: 1,
 };
@@ -7,7 +7,7 @@ import { getSession, setSession, deleteSession } from "../base/sessionstore.js";
 import { callStorySceneWithRetry } from "./callStoryAI.js";
 import { withApi } from "../_utils/withApi.js";
 import {
-    GEMINI_FLASH_LITE_MODEL,
+    GEMINI_STORY1_MODEL,
     GEMINI_THINKING_BUDGET_OFF,
 } from "./gemini-cache.js";
 import { buildStory1DynamicPrompt, buildStorySharedPrefix } from "./story-prompt-cache.js";
@@ -103,7 +103,7 @@ async function stream(uid, s, res) {
             : `${sharedPrefix}
 
 ${dynamicPrompt}`.trim();
-        const modelId = s.aiCache?.storyPrefix?.modelId || GEMINI_FLASH_LITE_MODEL;
+        const modelId = s.aiCache?.storyPrefix?.modelId || GEMINI_STORY1_MODEL;
 
         const result = await callStorySceneWithRetry(uid, prompt, STORY1_SYSTEM, {
             modelId,

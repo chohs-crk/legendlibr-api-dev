@@ -1,4 +1,4 @@
-﻿export const config = {
+export const config = {
     runtime: "nodejs",
     compute: 1,
 };
@@ -7,7 +7,7 @@ import { getSession, setSession, deleteSession } from "../base/sessionstore.js";
 import { callStorySceneWithRetry } from "./callStoryAI.js";
 import { withApi } from "../_utils/withApi.js";
 import {
-    GEMINI_FLASH_LITE_MODEL,
+    GEMINI_STORY3_MODEL,
     GEMINI_THINKING_BUDGET_OFF,
 } from "./gemini-cache.js";
 import { buildStory3DynamicPrompt, buildStorySharedPrefix } from "./story-prompt-cache.js";
@@ -83,22 +83,18 @@ async function stream(uid, s, res) {
         s.lastCall = Date.now();
         await setSession(uid, s);
 
-        const cachedContent = s.aiCache?.storyPrefix?.name || null;
         const sharedPrefix = buildStorySharedPrefix(s);
         const dynamicPrompt = buildStory3DynamicPrompt(s);
-        const prompt = cachedContent
-            ? dynamicPrompt
-            : `${sharedPrefix}
+        const prompt = `${sharedPrefix}
 
 ${dynamicPrompt}`.trim();
-        const modelId = s.aiCache?.storyPrefix?.modelId || GEMINI_FLASH_LITE_MODEL;
 
         const result = await callStorySceneWithRetry(uid, prompt, STORY3_SYSTEM, {
-            modelId,
-            cachedContent,
-            temperature: 0.3,
-            topP: 0.8,
-            maxOutputTokens: 768,
+            modelId: GEMINI_STORY3_MODEL,
+            cachedContent: null,
+            temperature: 0.35,
+            topP: 0.9,
+            maxOutputTokens: 896,
             maxRetry: 2,
             thinkingBudget: GEMINI_THINKING_BUDGET_OFF,
         });

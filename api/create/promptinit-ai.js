@@ -1,4 +1,4 @@
-﻿export const config = { runtime: "nodejs" };
+export const config = { runtime: "nodejs" };
 
 import { getSession, setSession, deleteSession } from "../base/sessionstore.js";
 import {
@@ -7,11 +7,15 @@ import {
 } from "./promptinit-ai.prompt.js";
 import {
     GEMINI_FLASH_LITE_MODEL,
+    GEMINI_FLASH_MODEL,
+    GEMINI_PROFILE_MODEL,
+    GEMINI_STYLE_MODEL,
     GEMINI_API_VERSION,
     GEMINI_THINKING_BUDGET_OFF,
     STORY_CACHE_TTL,
     createTextCache,
     shouldCreateStoryCache,
+    getPreferredModelList,
 } from "./gemini-cache.js";
 import { buildStorySharedPrefix } from "./story-prompt-cache.js";
 
@@ -118,7 +122,7 @@ async function requestGemini({
     uid,
     tag,
 }) {
-    const candidateModels = [...new Set([modelId, "gemini-2.5-flash-lite"])];
+    const candidateModels = getPreferredModelList(modelId);
     let lastErr = null;
 
     for (const MODEL_ID of candidateModels) {
@@ -309,7 +313,7 @@ ${prompt}
 
     try {
         const first = await requestGemini({
-            modelId: GEMINI_FLASH_LITE_MODEL,
+            modelId: GEMINI_PROFILE_MODEL,
             systemPrompt: SYSTEM_PROMPT_PROFILE,
             userPrompt: profilePrompt,
             temperature: 0.6,
@@ -337,7 +341,7 @@ ${prompt}
             console.warn("[AI][PARSE_FAIL_RETRYING][PROFILE]", { uid });
 
             const retry = await requestGemini({
-                modelId: GEMINI_FLASH_LITE_MODEL,
+                modelId: GEMINI_PROFILE_MODEL,
                 systemPrompt: SYSTEM_PROMPT_PROFILE,
                 userPrompt: profilePrompt,
                 temperature: 0.5,
@@ -401,10 +405,10 @@ ${prompt}
         let profile = "없음";
         try {
             const second = await requestGemini({
-                modelId: GEMINI_FLASH_LITE_MODEL,
+                modelId: GEMINI_STYLE_MODEL,
                 systemPrompt: SYSTEM_PROMPT_STYLE,
                 userPrompt: stylePrompt,
-                temperature: 0.4,
+                temperature: 0.5,
                 maxTokens: 2048,
                 thinkingBudget: GEMINI_THINKING_BUDGET_OFF,
                 uid,
@@ -426,10 +430,10 @@ ${prompt}
                     console.warn("[AI][PARSE_FAIL_RETRYING][STYLE]", { uid });
 
                     const retry2 = await requestGemini({
-                        modelId: GEMINI_FLASH_LITE_MODEL,
+                        modelId: GEMINI_STYLE_MODEL,
                         systemPrompt: SYSTEM_PROMPT_STYLE,
                         userPrompt: stylePrompt,
-                        temperature: 0.3,
+                        temperature: 0.4,
                         maxTokens: 2048,
                         thinkingBudget: GEMINI_THINKING_BUDGET_OFF,
                         uid,

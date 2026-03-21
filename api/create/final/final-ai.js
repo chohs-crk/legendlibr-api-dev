@@ -4,11 +4,16 @@ import {
     buildFinalEndingPrompt,
     buildFinalStatsPrompt
 } from "./final.prompt.js";
+import {
+    GEMINI_API_VERSION,
+    GEMINI_THINKING_BUDGET_OFF,
+    GEMINI_FINAL_ENDING_MODEL,
+    GEMINI_FINAL_STATS_MODEL,
+    getPreferredModelList,
+} from "../create/gemini-cache.js";
 
-const FINAL_MODEL_ID = process.env.GEMINI_FLASH_LITE_MODEL || "gemini-2.5-flash-lite-latest";
-const FINAL_STABLE_MODEL_ID = "gemini-2.5-flash-lite";
-const API_VERSION = "v1beta";
-const THINKING_BUDGET_OFF = 0;
+const ENDING_MAX_OUTPUT_TOKENS = 2048;
+const STATS_MAX_OUTPUT_TOKENS = 2048;
 
 function makeError(code, status = 500, meta) {
     const e = new Error(code);
@@ -18,8 +23,8 @@ function makeError(code, status = 500, meta) {
     return e;
 }
 
-function getModelCandidates(modelId = FINAL_MODEL_ID) {
-    return [...new Set([modelId, FINAL_STABLE_MODEL_ID])];
+function getModelCandidates(modelId) {
+    return getPreferredModelList(modelId);
 }
 
 function shouldFallbackModel(err) {
@@ -35,9 +40,9 @@ function shouldFallbackModel(err) {
     );
 }
 
-async function executeGeminiJSON(modelId, systemText, userText, temperature = 0.3) {
+async function executeGeminiJSON(modelId, systemText, userText, temperature = 0.3, maxOutputTokens = 2048) {
     const res = await fetch(
-        `https://generativelanguage.googleapis.com/${API_VERSION}/models/${modelId}:generateContent`,
+        `https://generativelanguage.googleapis.com/${GEMINI_API_VERSION}/models/${modelId}:generateContent`,
         {
             method: "POST",
             headers: {
@@ -57,9 +62,9 @@ async function executeGeminiJSON(modelId, systemText, userText, temperature = 0.
                 generationConfig: {
                     temperature,
                     topP: 0.9,
-                    maxOutputTokens: 2048,
+                    maxOutputTokens,
                     thinkingConfig: {
-                        thinkingBudget: THINKING_BUDGET_OFF
+                        thinkingBudget: GEMINI_THINKING_BUDGET_OFF
                     }
                 }
             })
@@ -91,9 +96,9 @@ async function executeGeminiJSON(modelId, systemText, userText, temperature = 0.
     };
 }
 
-async function callGeminiJSON(systemText, userText, temperature = 0.3) {
+async function callGeminiJSON(modelId, systemText, userText, temperature = 0.3, maxOutputTokens = 2048) {
     const MAX_RETRY = 2;
-    const modelCandidates = getModelCandidates();
+    const modelCandidates = getModelCandidates(modelId);
     let lastErr = null;
 
     for (const candidateModelId of modelCandidates) {
@@ -101,7 +106,7 @@ async function callGeminiJSON(systemText, userText, temperature = 0.3) {
 
         while (attempt < MAX_RETRY) {
             try {
-                return await executeGeminiJSON(candidateModelId, systemText, userText, temperature);
+                return await executeGeminiJSON(candidateModelId, systemText, userText, temperature, maxOutputTokens);
             } catch (err) {
                 lastErr = err;
 
@@ -208,7 +213,7 @@ export async function generateEndingAndFeatures({ uid, input, output, selected, 
     console.log("[FINAL][PROMPT1_LENGTH]", { uid, length: prompt.length });
 
     for (let formatAttempt = 0; formatAttempt < 2; formatAttempt++) {
-        const rawObj = await callGeminiJSON(SYSTEM_FOR_FINAL, prompt, 0.5);
+        const rawObj = await callGeminiJSON(GEMINI_FINAL_ENDING_MODEL, SYSTEM_FOR_FINAL, prompt, 0.55, ENDING_MAX_OUTPUT_TOKENS);
 
         const raw = rawObj.text;
         const usage = {
@@ -240,7 +245,7 @@ export async function generateStats({ uid, input, output, fullStory }) {
     const prompt = buildFinalStatsPrompt({ input, output, fullStory });
 
     for (let formatAttempt = 0; formatAttempt < 2; formatAttempt++) {
-        const rawObj = await callGeminiJSON(SYSTEM_FOR_STATS, prompt, 0.3);
+        const rawObj = await callGeminiJSON(GEMINI_FINAL_STATS_MODEL, SYSTEM_FOR_STATS, prompt, 0.3, STATS_MAX_OUTPUT_TOKENS);
 
         const raw = rawObj.text;
         const usage = {

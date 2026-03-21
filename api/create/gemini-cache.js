@@ -2,6 +2,23 @@ export const GEMINI_FLASH_LITE_MODEL =
     process.env.GEMINI_FLASH_LITE_MODEL || "gemini-2.5-flash-lite-latest";
 
 export const GEMINI_FLASH_LITE_STABLE_MODEL = "gemini-2.5-flash-lite";
+export const GEMINI_FLASH_MODEL =
+    process.env.GEMINI_FLASH_MODEL || "gemini-2.5-flash";
+export const GEMINI_FLASH_STABLE_MODEL = "gemini-2.5-flash";
+
+export const GEMINI_PROFILE_MODEL =
+    process.env.GEMINI_PROFILE_MODEL || GEMINI_FLASH_LITE_MODEL;
+export const GEMINI_STYLE_MODEL =
+    process.env.GEMINI_STYLE_MODEL || GEMINI_FLASH_MODEL;
+export const GEMINI_STORY1_MODEL =
+    process.env.GEMINI_STORY1_MODEL || GEMINI_FLASH_LITE_MODEL;
+export const GEMINI_STORY3_MODEL =
+    process.env.GEMINI_STORY3_MODEL || GEMINI_FLASH_MODEL;
+export const GEMINI_FINAL_ENDING_MODEL =
+    process.env.GEMINI_FINAL_ENDING_MODEL || GEMINI_FLASH_MODEL;
+export const GEMINI_FINAL_STATS_MODEL =
+    process.env.GEMINI_FINAL_STATS_MODEL || GEMINI_FLASH_LITE_MODEL;
+
 export const GEMINI_API_VERSION = "v1beta";
 export const GEMINI_THINKING_BUDGET_OFF = 0;
 export const STORY_CACHE_TTL = process.env.GEMINI_STORY_CACHE_TTL || "120s";
@@ -12,7 +29,21 @@ function dedupeModels(list) {
 }
 
 export function getPreferredModelList(preferredModelId = GEMINI_FLASH_LITE_MODEL) {
-    return dedupeModels([preferredModelId, GEMINI_FLASH_LITE_STABLE_MODEL]);
+    const modelId = String(preferredModelId || "").trim();
+
+    if (!modelId) {
+        return [GEMINI_FLASH_LITE_STABLE_MODEL];
+    }
+
+    if (modelId.includes("flash-lite")) {
+        return dedupeModels([modelId, GEMINI_FLASH_LITE_STABLE_MODEL]);
+    }
+
+    if (modelId.includes("flash")) {
+        return dedupeModels([modelId, GEMINI_FLASH_STABLE_MODEL]);
+    }
+
+    return dedupeModels([modelId]);
 }
 
 export function shouldCreateStoryCache(text) {
