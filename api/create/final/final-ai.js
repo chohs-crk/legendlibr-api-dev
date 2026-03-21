@@ -10,7 +10,7 @@ import {
     GEMINI_FINAL_ENDING_MODEL,
     GEMINI_FINAL_STATS_MODEL,
     getPreferredModelList,
-} from "../create/gemini-cache.js";
+} from "../gemini-cache.js";
 
 const ENDING_MAX_OUTPUT_TOKENS = 2048;
 const STATS_MAX_OUTPUT_TOKENS = 2048;
